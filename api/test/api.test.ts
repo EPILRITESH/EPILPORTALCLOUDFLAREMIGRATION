@@ -75,6 +75,15 @@ describe("auth", () => {
     expect((await call("POST", "/api/auth/login", { body: { employeeID: "LEG001", password: "oldpass1" } })).status).toBe(200);
   });
 
+  it("lets an admin and an employee share the same login ID (separate legacy sheets)", async () => {
+    await env.DB.prepare("INSERT INTO users (employee_id, role, name, mobile, password_hash) VALUES ('aman','admin','Aman Agarwal','9555555551',?), ('aman','employee','Aman Thakur','9555555552',?)").bind(PW_HASH, PW_HASH).run();
+    const a = await call("POST", "/api/adminauth/admin/login", { body: { employeeID: "aman", password: "secret123" } });
+    const e = await call("POST", "/api/auth/login", { body: { employeeID: "aman", password: "secret123" } });
+    expect(a.json.user.name).toBe("Aman Agarwal");
+    expect(e.json.user.name).toBe("Aman Thakur");
+    expect((await call("GET", "/api/employee/profile", { token: e.json.token })).json.name).toBe("Aman Thakur");
+  });
+
   it("returns legacy error codes", async () => {
     expect((await call("POST", "/api/auth/login", { body: { employeeID: "NOPE", password: "x" } })).status).toBe(404);
     expect((await call("POST", "/api/auth/login", { body: { employeeID: "EMP001", password: "wrong" } })).status).toBe(401);

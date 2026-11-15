@@ -15,7 +15,7 @@
       "binding": "DB",
       "database_name": "epil-db",
       // Replace after `wrangler d1 create epil-db` (see docs/DEPLOYMENT.md).
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "61c6d8e7-65eb-48df-96dc-05e500eef527",
       "migrations_dir": "migrations"
     }
   ],
@@ -25,7 +25,8 @@
 
   "vars": {
     // Comma-separated list of allowed browser origins for CORS.
-    "CORS_ORIGINS": "http://localhost:3000,http://localhost:3001,http://localhost:8787",
+    "CORS_ORIGINS": "https://epil-portal.epil.workers.dev,https://epil-admin.epil.workers.dev,http://localhost:3000,http://localhost:3001",
+    "PUBLIC_API_URL": "https://epil-api.epil.workers.dev",
     "MAX_UPLOAD_BYTES": "5242880",
     "WHATSAPP_TEMPLATE_PENDING": "pendingtask",
     "WHATSAPP_TEMPLATE_WORKREPORT": "workreport",

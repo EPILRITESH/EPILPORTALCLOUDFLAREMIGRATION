@@ -81,7 +81,7 @@ test("migrated data is served through the original API contract", async () => {
 
   // Consolidated done-date merged into Master.Actual → c1 no longer open
   const open = (await api("GET", "/api/checklist", asha)).json;
-  assert.deepEqual(open.map((c) => c.TaskID), ["c2"]);
+  assert.deepEqual(open.map((c) => c.TaskID), ["c2", "c3"]); // same slot, distinct tasks: both kept
 
   // Support ticket group from identical legacy Issue text moves together
   const ravi = await login("e2BBBB");
@@ -101,7 +101,7 @@ test("migrated data is served through the original API contract", async () => {
   const emps = (await api("GET", "/api/employee/all", admin)).json;
   assert.equal(emps.length, 3);
   const meena = emps.find((e) => e.name === "Meena").Designation;
-  assert.ok(meena && !/^\d{4}-/.test(meena), `bad fallback designation: ${meena}`);
+  assert.equal(meena, "", "blank designation must stay blank, not be guessed");
 
   const em = (await api("GET", "/api/em-sheet/em-sheet", admin)).json;
   assert.equal(em.data.weekInfo, "WEEK NO.-09 (02/03 TO 08/03)");

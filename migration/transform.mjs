@@ -79,7 +79,7 @@ const DOCS = { 52: "bankPassbook", 54: "aadhaarCard", 56: "panCard", 59: "educat
 const userCols = ["employee_id", "role", "name", "mobile", "password_hash", "department", "designation", "company_name", "date_of_birth", "joining_date", "profile_picture", "doer_name", "shift_start_time", "shift_end_time", "total_working_hours", "hr_details", "created_at"];
 const userRows = [];
 const docRows = []; // [employee_id, kind, ref]
-const seenIds = new Set();
+const seenIds = { employee: new Set(), admin: new Set() }; // IDs are unique per role (separate legacy sheets)
 const seenNames = { employee: new Map(), admin: new Map() };
 const isoOr = (v) => (/^\d{4}-\d{2}-\d{2}T/.test(v) ? v : new Date().toISOString());
 
@@ -91,15 +91,17 @@ emp.rows.forEach((r, i) => {
   if (!name) return issue("users", row, "Employee row without name", "skipped");
   if (!cell(r, 3)) issue("users", row, `Employee "${name}" has no password hash`, "imported; cannot log in until an admin resets the password");
   if (!id) { id = newId(6); issue("users", row, `Employee "${name}" had no EmployeeID`, `assigned ${id}`); }
-  if (seenIds.has(id)) return issue("users", row, `Duplicate EmployeeID ${id} ("${name}")`, "skipped (legacy login used the first row)");
-  seenIds.add(id);
+  if (seenIds.employee.has(id)) return issue("users", row, `Duplicate EmployeeID ${id} ("${name}")`, "skipped (legacy login used the first row)");
+  seenIds.employee.add(id);
   if (seenNames.employee.has(name)) issue("users", row, `Duplicate employee name "${name}" (also row ${seenNames.employee.get(name)})`, "imported both; name-based features match both");
   seenNames.employee.set(name, row);
   const hr = {};
   for (const [k, v] of Object.entries(HR)) if (cell(r, +k)) hr[v] = cell(r, +k);
   for (const [k, kind] of Object.entries(DOCS)) if (trimmed(r, +k)) docRows.push([id, kind, fileRef(cell(r, +k))]);
-  const desig = designationOf(r);
-  if (!trimmed(r, DESIG) && !trimmed(r, 10)) issue("users", row, `Employee "${name}" has a blank Designation column`, desig ? `guessed "${desig}" (legacy heuristic) — please verify; training assignment depends on it` : "left blank — only COMMON trainings will be assigned");
+  // Legacy guessed a designation from other columns when blank (it picked "Male" from the gender
+  // column in real data). A wrong guess silently mis-assigns training, so leave it blank and report.
+  const desig = trimmed(r, DESIG) || trimmed(r, 10);
+  if (!desig) issue("users", row, `Employee "${name}" has a blank Designation column`, `left blank (legacy would have shown "${designationOf(r) || "nothing"}") — admin should set it; until then only COMMON trainings are assigned`);
   userRows.push([id, "employee", name, trimmed(r, 2), cell(r, 3), cell(r, DEPT) || cell(r, 4), desig, cell(r, 6), cell(r, 7), cell(r, 8), fileRef(cell(r, 9)), cell(r, 11), cell(r, 17), cell(r, 18), cell(r, 19), JSON.stringify(hr), isoOr(cell(r, 5))]);
 });
 
@@ -111,18 +113,14 @@ adm.rows.forEach((r, i) => {
   const name = trimmed(r, 1);
   if (!name) return issue("users", row, "Admin row without name", "skipped");
   if (!id) { id = newId(6); issue("users", row, `Admin "${name}" had no ID`, `assigned ${id}`); }
-  if (seenIds.has(id)) {
-    const fresh = `A${newId(5)}`;
-    issue("users", row, `Admin ID ${id} ("${name}") collides with another user`, `admin re-numbered to ${fresh} — tell them their new login ID`);
-    id = fresh;
-  }
-  seenIds.add(id);
+  if (seenIds.admin.has(id)) return issue("users", row, `Duplicate admin ID ${id} ("${name}")`, "skipped (legacy login used the first row)");
+  seenIds.admin.add(id);
   userRows.push([id, "admin", name, trimmed(r, 2), cell(r, 3), cell(r, 4), "", cell(r, 6), "", "", "", "", "", "", "", "{}", isoOr(cell(r, 5))]);
 });
 insert("users", userCols, userRows);
 if (docRows.length) {
   report.counts.user_documents = docRows.length;
-  for (const [eid, kind, ref] of docRows) sql.push(`INSERT INTO user_documents (user_id, kind, file_ref) SELECT id, ${q(kind)}, ${q(ref)} FROM users WHERE employee_id = ${q(eid)};`);
+  for (const [eid, kind, ref] of docRows) sql.push(`INSERT INTO user_documents (user_id, kind, file_ref) SELECT id, ${q(kind)}, ${q(ref)} FROM users WHERE role = 'employee' AND employee_id = ${q(eid)};`);
 }
 
 // =====================================================================
@@ -162,7 +160,7 @@ if (docRows.length) {
     if (!id) { id = newId(6); issue("checklist_tasks", row, "Missing TaskID", `assigned ${id}`); }
     if (seen.has(id)) { const n = newId(6); issue("checklist_tasks", row, `Duplicate TaskID ${id}`, `re-numbered to ${n}`); id = n; }
     const slot = `${cell(r, 0)}|${cell(r, 5)}|${cell(r, 6)}`;
-    if (slots.has(slot)) return issue("checklist_tasks", row, `Duplicate slot (${cell(r, 0)} / ${cell(r, 5)} / ${cell(r, 6)})`, "skipped (exact duplicate of an earlier row)");
+    if (slots.has(slot)) issue("checklist_tasks", row, `Duplicate slot (${cell(r, 0)} / ${cell(r, 5)} / ${cell(r, 6)})`, "kept (distinct TaskID; legacy counted both)");
     seen.add(id); slots.add(slot);
     const actual = cell(r, 7) || doneAt.get(trimmed(r, 3)) || "";
     rows.push([id, cell(r, 0), cell(r, 1), cell(r, 2), cell(r, 4), cell(r, 5), cell(r, 6), actual, cell(r, 8), cell(r, 9), cell(r, 10)]);

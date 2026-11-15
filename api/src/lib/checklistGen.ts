@@ -39,16 +39,17 @@ export function plannedSlots(freq: string, dayOrDate: string, month: number, yea
 
 export interface TemplateRow { template_id: string; name: string; email: string; department: string; task: string; freq: string; day_or_date: string; }
 
-/** Insert tasks for the given slots; duplicates are skipped by the unique index. */
+/** Insert tasks for the given slots; a slot that already exists is skipped (idempotent). */
 export async function insertSlots(env: Env, t: TemplateRow, slots: string[]) {
   const created: { taskId: string; task: string; planned: string; freq: string }[] = [];
   if (!slots.length) return created;
   const ids = slots.map(() => nanoid(6));
   const stmts = slots.map((planned, i) =>
     env.DB.prepare(
-      `INSERT OR IGNORE INTO checklist_tasks (task_id, name, email, department, freq, task, planned, actual, source, template_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '', 'AUTO', ?)`,
-    ).bind(ids[i], t.name, t.email, t.department, t.freq, t.task, planned, t.template_id));
+      `INSERT INTO checklist_tasks (task_id, name, email, department, freq, task, planned, actual, source, template_id)
+       SELECT ?, ?, ?, ?, ?, ?, ?, '', 'AUTO', ?
+       WHERE NOT EXISTS (SELECT 1 FROM checklist_tasks WHERE name = ? AND task = ? AND planned = ?)`,
+    ).bind(ids[i], t.name, t.email, t.department, t.freq, t.task, planned, t.template_id, t.name, t.task, planned));
   // D1 batch limit safety: chunk in 50s
   for (let i = 0; i < stmts.length; i += 50) {
     const res = await env.DB.batch(stmts.slice(i, i + 50));

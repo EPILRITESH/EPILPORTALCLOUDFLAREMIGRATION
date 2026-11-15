@@ -136,10 +136,10 @@ authRoutes.post("/change-password", requireAuth, async (c) => {
 /** POST /api/auth/reset-password (admin resets an employee's password; new) */
 authRoutes.post("/reset-password", requireAuth, async (c) => {
   if (!isAdmin(c)) fail(403, "Admin access required");
-  const { employeeID, newPassword } = await jsonBody(c.req);
+  const { employeeID, newPassword, role } = await jsonBody(c.req);
   if (!employeeID || !newPassword || String(newPassword).length < 6) fail(400, "employeeID and a 6+ character newPassword are required");
-  const r = await c.env.DB.prepare("UPDATE users SET password_hash = ? WHERE employee_id = ?")
-    .bind(await hashPassword(String(newPassword)), String(employeeID)).run();
+  const r = await c.env.DB.prepare("UPDATE users SET password_hash = ? WHERE employee_id = ? AND role = ?")
+    .bind(await hashPassword(String(newPassword)), String(employeeID), role === "admin" ? "admin" : "employee").run();
   if (!r.meta.changes) fail(404, "User not found");
   await audit(c.env, c.get("user").employeeID, "reset-password", "user", String(employeeID));
   return c.json({ ok: true });
