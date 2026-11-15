@@ -1,0 +1,37 @@
+name: Claude (AI pair developer)
+
+# Mention @claude in an issue, PR description or PR review comment to have
+# Claude Code implement the change, answer questions or review code.
+# Requires the ANTHROPIC_API_KEY repository secret.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # On new PRs, run an automatic review; on mentions, follow the request.
+          prompt: ${{ github.event_name == 'pull_request' && 'Review this pull request against CLAUDE.md. Focus on correctness, RBAC (every route must enforce the right role), data integrity in D1, and API-contract compatibility with the frontends. Post concise inline comments.' || '' }}

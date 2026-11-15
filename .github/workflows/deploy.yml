@@ -1,0 +1,62 @@
+name: Deploy to Cloudflare
+
+# Runs after CI passes on main, or manually.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  api:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: production
+    defaults: { run: { working-directory: api } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: api/package-lock.json }
+      - run: npm ci
+      - name: Apply D1 migrations (forward-only, idempotent)
+        run: npx wrangler d1 migrations apply epil-db --remote
+      - name: Deploy API Worker
+        run: npx wrangler deploy --var CORS_ORIGINS:"${{ vars.CORS_ORIGINS }}" --var PUBLIC_API_URL:"${{ vars.API_URL }}"
+      - name: Smoke test
+        run: |
+          for i in 1 2 3 4 5; do
+            curl -fsS "${{ vars.API_URL }}/health" | grep -q '"db":true' && exit 0; sleep 5; done
+          echo "::error::API health check failed"; exit 1
+
+  frontends:
+    needs: api
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      matrix: { app: [doer, admin] }
+    defaults:
+      run:
+        working-directory: frontend/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          CI: "false"
+          GENERATE_SOURCEMAP: "false"
+          REACT_APP_BASE_URL: ${{ vars.API_URL }}
+      - run: npx wrangler@4.162.0 deploy
