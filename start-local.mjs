@@ -5,7 +5,7 @@
 //   node start-local.mjs --reset    wipe the local database and re-seed
 //   node start-local.mjs --list-users  print every account's login ID (newest first)
 import { spawn, execSync } from "node:child_process";
-import { existsSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const root = import.meta.dirname;
@@ -19,9 +19,12 @@ if (!existsSync(wrangler)) {
   run("npm ci", api);
 }
 for (const app of ["doer", "admin"]) {
-  if (!existsSync(path.join(root, "frontend", app, "build", "index.html"))) {
-    console.log(`Building ${app} portal (first run only)...`);
-    run("npm ci --legacy-peer-deps", path.join(root, "frontend", app));
+  const buildDir = path.join(root, "frontend", app, "build");
+  const js = existsSync(path.join(buildDir, "static", "js")) ? readdirSync(path.join(buildDir, "static", "js")).find((f) => /^main\..*\.js$/.test(f)) : null;
+  const targetsLocal = js && readFileSync(path.join(buildDir, "static", "js", js), "utf8").includes("localhost:8787");
+  if (!targetsLocal) { // missing, or built for production
+    if (!existsSync(path.join(root, "frontend", app, "node_modules"))) run("npm ci --legacy-peer-deps", path.join(root, "frontend", app));
+    console.log(`Building ${app} portal for local use...`);
     execSync("npm run build", { cwd: path.join(root, "frontend", app), stdio: "inherit", shell: true,
       env: { ...process.env, REACT_APP_BASE_URL: "http://localhost:8787", CI: "false", GENERATE_SOURCEMAP: "false" } });
   }
