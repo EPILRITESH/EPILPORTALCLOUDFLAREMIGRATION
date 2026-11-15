@@ -60,5 +60,6 @@ jobs:
           REACT_APP_BASE_URL: https://api.example.invalid
       - name: Ensure no secrets are bundled
         run: |
-          if grep -rEl "EAA[A-Za-z0-9]{20,}|graph\.facebook\.com|PRIVATE KEY" build/; then
+          # Quoted Meta token literals, direct Graph API calls, or private keys (base64 font data is not a hit)
+          if grep -rEl "[\"'\`]EAA[A-Za-z0-9]{40,}[\"'\`]|graph\.facebook\.com|BEGIN [A-Z ]*PRIVATE KEY" build/; then
             echo "::error::Secret-looking content found in the frontend bundle"; exit 1; fi
