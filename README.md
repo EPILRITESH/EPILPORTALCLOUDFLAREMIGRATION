@@ -35,3 +35,12 @@ REACT_APP_BASE_URL=http://localhost:8787 PORT=3001 npm start
 |---|---|---|
 | API | `cd api && npm test` | 17 integration tests inside the Workers runtime (auth, RBAC, every module's workflow, R2 signed URLs, cron idempotency) |
 | Migration | `cd migration && npm test` | Messy sheet fixtures → transform → D1 → running API: legacy logins work, data is served unchanged, problems are reported |
+
+## Run it on your computer (no Cloudflare account needed)
+Requires Node.js 20+ (https://nodejs.org). In the project folder:
+```bash
+node start-local.mjs
+```
+First run installs dependencies and creates a demo database (about 1–2 minutes). Then open
+http://localhost:3000 (Doer: `e1AAAA` / `legacy123`) and http://localhost:3001 (Admin: `a1ZZZZ` / `legacy123`).
+Use `node start-local.mjs --reset` to wipe the demo data.
