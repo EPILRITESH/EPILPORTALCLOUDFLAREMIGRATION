@@ -1,0 +1,18 @@
+{
+  "name": "epil-migration",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "One-time migration: Google Sheets -> Cloudflare D1, Cloudinary -> Cloudflare R2",
+  "scripts": {
+    "export": "node export-sheets.mjs",
+    "files": "node migrate-files.mjs",
+    "transform": "node transform.mjs",
+    "verify": "node verify.mjs",
+    "test": "node --test test/e2e.test.mjs"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20",
+    "google-auth-library": "10.5.0"
+  }
+}

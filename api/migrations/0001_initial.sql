@@ -39,10 +39,12 @@ CREATE TABLE users (
   hr_details         TEXT    NOT NULL DEFAULT '{}',    -- JSON: remaining HR/payroll/KYC fields
   is_active          INTEGER NOT NULL DEFAULT 1,
   created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  UNIQUE (role, name),
-  UNIQUE (role, mobile)
+  updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+-- Uniqueness of (role,name)/(role,mobile) is enforced by the API on sign-up, not by
+-- constraints: hand-edited legacy sheets may contain duplicates that must still import.
+CREATE INDEX idx_users_role_name ON users(role, name);
+CREATE INDEX idx_users_role_mobile ON users(role, mobile);
 CREATE INDEX idx_users_name ON users(name);
 CREATE INDEX idx_users_department ON users(department);
 
