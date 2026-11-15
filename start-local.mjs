@@ -3,6 +3,7 @@
 // First run creates a demo database with sample data. Works on Windows, macOS, Linux.
 //   node start-local.mjs            start (seed demo data if no database yet)
 //   node start-local.mjs --reset    wipe the local database and re-seed
+//   node start-local.mjs --list-users  print every account's login ID (newest first)
 import { spawn, execSync } from "node:child_process";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -26,6 +27,14 @@ for (const app of ["doer", "admin"]) {
   }
 }
 
+if (process.argv.includes("--list-users")) {
+  if (!existsSync(path.join(state, "state"))) { console.log("No local database yet — run `node start-local.mjs` first."); process.exit(1); }
+  // Show every account's login ID (e.g. after registering when the ID was missed).
+  const out = execSync(`"${wrangler}" d1 execute epil-db --local --persist-to="${path.join(state, "state")}" --json --command "SELECT employee_id AS login_id, role, name, mobile, department, created_at FROM users ORDER BY id DESC"`,
+    { cwd: api, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "ignore"] });
+  console.table(JSON.parse(out)[0].results);
+  process.exit(0);
+}
 if (process.argv.includes("--reset")) rmSync(state, { recursive: true, force: true });
 if (!existsSync(path.join(state, "seed.sql"))) {
   console.log("Creating demo database with sample data...");

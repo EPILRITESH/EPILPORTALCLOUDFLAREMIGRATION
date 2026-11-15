@@ -43,4 +43,4 @@ node start-local.mjs
 ```
 First run installs dependencies and creates a demo database (about 1–2 minutes). Then open
 http://localhost:3000 (Doer: `e1AAAA` / `legacy123`) and http://localhost:3001 (Admin: `a1ZZZZ` / `legacy123`).
-Use `node start-local.mjs --reset` to wipe the demo data.
+Use `node start-local.mjs --reset` to wipe the demo data, and `node start-local.mjs --list-users` to see every login ID.

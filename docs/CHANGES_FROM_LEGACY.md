@@ -28,6 +28,8 @@ exists, with the same paths, request bodies and response keys. The changes below
 | B9 | Support-ticket copies were linked by identical Issue text, so two unrelated tickets with the same text moved together. | New tickets share a `group_key`. Migrated tickets keep the old text-based grouping, so history behaves exactly as before. |
 | B10 | A blank Designation picked up the "Created" timestamp as a designation through the fallback heuristic. | Timestamps are skipped, and every guessed designation is listed in the migration report. |
 | B11 | The checklist "done" date lived in a separate `Consolidated` tab and relied on a sheet formula. | Stored directly on the task. Migration merges `Consolidated` into it. |
+| B12 | Doer registration showed the new Employee ID for 3 seconds at the top of a long form, then redirected — people never saw their login ID. | ID shown in a popup with Copy, until the user clicks "Go to Login". `node start-local.mjs --list-users` lists every login ID locally. |
+| B13 | Clicking **Next** on the "Bank & Docs" tab submitted the registration immediately (React reused the button as Submit mid-click), skipping "Personal Details". | Buttons keyed separately; the form only submits from the final tab. |
 
 ## Unchanged on purpose (business rules)
 The dashboard scoring formula (`pending% × 0.8 + avg delay% × 0.2`), Monday-based week numbering,

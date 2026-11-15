@@ -107,6 +107,8 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [newEmployeeId, setNewEmployeeId] = useState("");
+  const [copied, setCopied] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
 
@@ -150,8 +152,10 @@ export default function Register() {
         submitData
       );
       
-      setMsg(`✅ Registered Successfully! Employee ID: ${res.data.EmployeeID}`);
-      setTimeout(() => navigate("/"), 3000);
+      // Keep the new Employee ID on screen until the user dismisses it (it used to vanish
+      // after 3 seconds at the top of a long form, so people never saw their login ID).
+      setMsg(`Registered Successfully! Employee ID: ${res.data.EmployeeID}`);
+      setNewEmployeeId(res.data.EmployeeID);
     } catch (err) {
       console.error("Error:", err.response?.data);
       setError(err.response?.data?.error || "Registration failed");
@@ -198,6 +202,34 @@ export default function Register() {
         {msg && (
           <div className="mx-6 mt-4 bg-green-50 border-l-4 border-green-500 text-green-700 p-3 rounded">
             ✅ {msg}
+          </div>
+        )}
+
+        {newEmployeeId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 text-center">
+              <div className="text-4xl mb-2">✅</div>
+              <h3 className="text-xl font-bold text-gray-800">Registration successful</h3>
+              <p className="text-gray-600 mt-2 text-sm">Your Employee ID is your login ID. Please note it down.</p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <span className="text-3xl font-mono font-bold tracking-wider text-blue-700 bg-blue-50 px-4 py-2 rounded-lg select-all">{newEmployeeId}</span>
+                <button
+                  type="button"
+                  onClick={() => { navigator.clipboard?.writeText(newEmployeeId); setCopied(true); }}
+                  className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-100"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">IDs are case-sensitive.</p>
+              <button
+                type="button"
+                onClick={() => navigate("/login")}
+                className="mt-6 w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700"
+              >
+                Go to Login
+              </button>
+            </div>
           </div>
         )}
 
@@ -652,8 +684,11 @@ export default function Register() {
               ← Previous
             </button>
             
+            {/* Distinct keys: otherwise React turns the clicked "Next" button into the submit
+                button mid-click and the form submits from the 4th tab, skipping the last one. */}
             {activeTab < tabs.length - 1 ? (
               <button
+                key="next"
                 type="button"
                 onClick={() => setActiveTab(activeTab + 1)}
                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
@@ -662,6 +697,7 @@ export default function Register() {
               </button>
             ) : (
               <button
+                key="submit"
                 type="submit"
                 disabled={loading}
                 className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition flex items-center gap-2"
