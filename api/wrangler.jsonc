@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "epil-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "placement": { "mode": "smart" },
+
+  // Checklist auto-generation (replaces node-cron "0 * * * *" + last-generate.txt).
+  "triggers": { "crons": ["0 * * * *"] },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "epil-db",
+      // Replace after `wrangler d1 create epil-db` (see docs/DEPLOYMENT.md).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "epil-files" }
+  ],
+
+  "vars": {
+    // Comma-separated list of allowed browser origins for CORS.
+    "CORS_ORIGINS": "http://localhost:3000,http://localhost:3001,http://localhost:8787",
+    "MAX_UPLOAD_BYTES": "5242880",
+    "WHATSAPP_TEMPLATE_PENDING": "pendingtask",
+    "WHATSAPP_TEMPLATE_WORKREPORT": "workreport",
+    "WHATSAPP_API_VERSION": "v21.0"
+  }
+
+  // Secrets (set with `wrangler secret put <NAME>`, never commit):
+  //   JWT_SECRET            – HS256 signing key for session tokens
+  //   FILE_URL_SECRET       – HMAC key for signed R2 download URLs
+  //   META_WA_TOKEN         – WhatsApp Cloud API token
+  //   META_WA_PHONE_ID      – WhatsApp phone number ID
+  //   ADMIN_REGISTRATION_KEY – optional; required to self-register new admins
+}

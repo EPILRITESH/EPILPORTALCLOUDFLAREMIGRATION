@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+dist/
+build/
+.env
+.env.*
+!.env.example
+.dev.vars
+*.log
+migration/out/
+migration/credentials*.json
+.DS_Store
