@@ -65,11 +65,13 @@ function designationOf(r) {
     if (i === DESIG) continue;
     const v = trimmed(r, i);
     if (!v || /^\d{5,}$/.test(v.replace(/[\s+\-]/g, "")) || v.length > 60) continue;
-    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v) || /^https?:\/\//i.test(v)) continue;
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v) || /^\d{4}-\d{2}-\d{2}/.test(v) || /^https?:\/\//i.test(v)) continue; // dates/ISO/links
+    if (v.startsWith("$2")) continue; // bcrypt hash
     return v;
   }
   return "";
 }
+// (legacy picked the ISO "Created" timestamp as a designation for blank rows — now skipped)
 
 const HR = { 12: "gender", 13: "employeeType", 14: "workLocation", 15: "employeeStatus", 16: "shiftName", 20: "lunchBreak", 21: "weeklyOff", 22: "overtimeApplicable", 23: "overtimeRate", 24: "basicSalary", 25: "petrolAllowance", 26: "petrolAmount", 27: "foodAllowance", 28: "foodAmount", 29: "workingDays", 30: "pfApplicable", 31: "ptApplicable", 32: "advanceAllowed", 33: "advanceLimit", 34: "biometricId", 35: "graceTime", 36: "lateMarkAfter", 37: "halfDayAfter", 38: "minWorkingHours", 39: "punchRequired", 40: "autoAbsentAfter", 41: "paidLeave", 42: "casualLeave", 43: "sickLeave", 44: "earnedLeave", 45: "leaveCarryForward", 46: "leaveCarryMax", 47: "bankName", 48: "accountNumber", 49: "ifscCode", 50: "pfNumber", 51: "esicNumber", 53: "aadhaarNumber", 55: "panNumber", 57: "highestQualification", 58: "passingYear", 60: "previousCompany", 61: "previousDesignation", 62: "totalExperience", 64: "fatherName", 65: "motherName", 66: "spouseName", 67: "spouseDob", 68: "motherInLawName", 69: "fatherInLawName", 70: "emergencyContactName", 71: "emergencyContactNumber", 72: "permanentAddress", 73: "currentAddress", 74: "lastUpdatedAt" };
 const DOCS = { 52: "bankPassbook", 54: "aadhaarCard", 56: "panCard", 59: "educationCert", 63: "experienceCert" };
@@ -96,7 +98,9 @@ emp.rows.forEach((r, i) => {
   const hr = {};
   for (const [k, v] of Object.entries(HR)) if (cell(r, +k)) hr[v] = cell(r, +k);
   for (const [k, kind] of Object.entries(DOCS)) if (trimmed(r, +k)) docRows.push([id, kind, fileRef(cell(r, +k))]);
-  userRows.push([id, "employee", name, trimmed(r, 2), cell(r, 3), cell(r, DEPT) || cell(r, 4), designationOf(r), cell(r, 6), cell(r, 7), cell(r, 8), fileRef(cell(r, 9)), cell(r, 11), cell(r, 17), cell(r, 18), cell(r, 19), JSON.stringify(hr), isoOr(cell(r, 5))]);
+  const desig = designationOf(r);
+  if (!trimmed(r, DESIG) && !trimmed(r, 10)) issue("users", row, `Employee "${name}" has a blank Designation column`, desig ? `guessed "${desig}" (legacy heuristic) — please verify; training assignment depends on it` : "left blank — only COMMON trainings will be assigned");
+  userRows.push([id, "employee", name, trimmed(r, 2), cell(r, 3), cell(r, DEPT) || cell(r, 4), desig, cell(r, 6), cell(r, 7), cell(r, 8), fileRef(cell(r, 9)), cell(r, 11), cell(r, 17), cell(r, 18), cell(r, 19), JSON.stringify(hr), isoOr(cell(r, 5))]);
 });
 
 const adm = await loadGrid(DIR, "admin");

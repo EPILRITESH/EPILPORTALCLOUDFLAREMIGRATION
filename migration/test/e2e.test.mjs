@@ -52,6 +52,7 @@ test("report flags every messy legacy row", async () => {
   const report = JSON.parse(await readFile(path.join(work, "report.json"), "utf8"));
   const problems = report.issues.map((i) => i.problem).join("\n");
   assert.match(problems, /Duplicate EmployeeID e2BBBB/);
+  assert.match(problems, /"Meena" has a blank Designation/);
   assert.match(problems, /Duplicate TaskID d1/);
   assert.match(problems, /Duplicate slot/);
   assert.match(problems, /Duplicate TicketID #00002/);
@@ -99,7 +100,8 @@ test("migrated data is served through the original API contract", async () => {
   // Designation fallback filled Meena's blank designation from the row
   const emps = (await api("GET", "/api/employee/all", admin)).json;
   assert.equal(emps.length, 3);
-  assert.ok(emps.find((e) => e.name === "Meena").Designation);
+  const meena = emps.find((e) => e.name === "Meena").Designation;
+  assert.ok(meena && !/^\d{4}-/.test(meena), `bad fallback designation: ${meena}`);
 
   const em = (await api("GET", "/api/em-sheet/em-sheet", admin)).json;
   assert.equal(em.data.weekInfo, "WEEK NO.-09 (02/03 TO 08/03)");

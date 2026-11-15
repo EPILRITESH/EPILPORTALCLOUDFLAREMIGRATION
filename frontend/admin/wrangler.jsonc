@@ -1,0 +1,10 @@
+{
+  "$schema": "../../api/node_modules/wrangler/config-schema.json",
+  "name": "epil-admin",
+  "compatibility_date": "2026-11-01",
+  // Static React build served from Cloudflare's edge; unknown paths fall back to index.html
+  "assets": {
+    "directory": "./build",
+    "not_found_handling": "single-page-application"
+  }
+}
