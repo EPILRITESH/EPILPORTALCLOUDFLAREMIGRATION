@@ -1,12 +1,156 @@
-node_modules/
-.wrangler/
-dist/
-build/
+# =====================================================================
+# EPIL Portal (Cloudflare) — never commit secrets, data or build output
+# =====================================================================
+
+# ---- Environment files & secrets -----------------------------------
 .env
 .env.*
+*.env
 !.env.example
+!**/.env.example
 .dev.vars
-*.log
+.dev.vars.*
+**/.dev.vars*
+secrets/
+secrets.*
+*.secret
+*.secrets
+*secret*.json
+*credentials*.json
+*credential*.json
+*.credentials
+token.json
+tokens.json
+*.token
+.npmrc.local
+
+# ---- Google service accounts / Sheets credentials --------------------
+service-account*.json
+*service_account*.json
+*serviceaccount*.json
+google-credentials*.json
+gcp-*.json
+client_secret*.json
+*-sa.json
+.env.migration
+
+# ---- Private keys & certificates -------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*.gpg
+*.asc
+
+# ---- Cloudflare / Wrangler local state --------------------------------
+.wrangler/
+.mf/
+.cloudflare/
+worker-configuration.d.ts.bak
+
+# ---- Node.js ----------------------------------------------------------
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+!.yarn/releases
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Build & deploy output -------------------------------------------
+dist/
+build/
+out/
+.output/
+coverage/
+*.tsbuildinfo
+.vite/
+.cache/
+.parcel-cache/
+.turbo/
+storybook-static/
+
+# ---- Databases, exports & backups (may contain personal data) ---------
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.dump
+*.bak
+*.backup
+backup*.sql
+backups/
+*-backup.sql
+d1-export*.sql
+# Migration working files: raw sheet exports, generated seed SQL, reports, file maps
 migration/out/
-migration/credentials*.json
+migration/**/*.csv
+seed.sql
+report.json
+file-map.json
+file-failures.json
+export-summary.json
+*.xlsx
+*.xls
+# Keep schema migrations
+!api/migrations/*.sql
+
+# ---- Logs, debugging & temp ------------------------------------------
+logs/
+*.log
+*.log.*
+*.pid
+*.seed
+*.tmp
+*.temp
+tmp/
+temp/
+.tmp/
+*.swp
+*.swo
+*~
+.eslintcache
+.stylelintcache
+
+# ---- IDE / editors ----------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+.history/
+.fleet/
+.zed/
+
+# ---- OS ---------------------------------------------------------------
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---- Archives / packaged copies --------------------------------------
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
