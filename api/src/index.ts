@@ -96,10 +96,10 @@ export default {
       ctx.waitUntil(runMonthlyGeneration(env).then((r) => console.log("checklist generation", JSON.stringify({ ...r, createdTasks: undefined, count: "createdTasks" in r ? r.createdTasks.length : 0 }))));
       return;
     }
-    // Every minute: push portal changes to Google Sheets. Every 5 minutes (transition): first pull
-    // old-portal changes from the sheets, THEN push — sequential, so the push never races the pull.
+    // Every minute, two-way: first pull edits made in Google Sheets into D1, THEN push portal
+    // changes to Sheets — sequential, so the push never races the pull.
     const minute = new Date(event.scheduledTime).getUTCMinutes();
-    const pull = minute % 5 === 2 && pullEnabled(env)
+    const pull = pullEnabled(env)
       ? runSheetsPull(env).then((r) => console.log("sheets pull", JSON.stringify(r))).catch((e) => console.error("sheets pull", e.message))
       : Promise.resolve();
     ctx.waitUntil(pull.then(() => (syncEnabled(env) ? runSheetsSync(env) : null))

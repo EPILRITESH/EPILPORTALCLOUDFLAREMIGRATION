@@ -50,6 +50,9 @@ if (!existsSync(path.join(state, "seed.sql"))) {
   writeFileSync(path.join(state, "README.txt"), "Local demo database. Delete this folder (or use --reset) to start fresh.\n");
 }
 
+// Always apply any new schema migrations (safe to repeat) — older demo databases need them too.
+run(`"${wrangler}" d1 migrations apply epil-db --local --persist-to="${path.join(state, "state")}"`, api);
+
 const procs = [
   ["API  ", api, ["dev", "--port", "8787", `--persist-to=${path.join(state, "state")}`, "--var", "JWT_SECRET:local-dev-secret", "--var", "FILE_URL_SECRET:local-dev-files"]],
   ["DOER ", path.join(root, "frontend", "doer"), ["dev", "--port", "3000", "--inspector-port", "9232"]],

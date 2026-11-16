@@ -23,7 +23,8 @@ function setCell(g: Grid, r: number, c: number, v: string) {
   while (g.rows.length < r) g.rows.push([]);
   const row = g.rows[r - 1];
   while (row.length <= c) row.push("");
-  row[c] = v;
+  // like Google Sheets (USER_ENTERED): a leading apostrophe forces text and is not shown
+  row[c] = v.startsWith("'") ? v.slice(1) : v;
 }
 async function fakeGoogle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(String(input));
@@ -133,6 +134,7 @@ describe("Google Sheets backup sync", () => {
   it("formula-safe cell values", () => {
     expect(cellValue("=IMPORTXML(\"http://x\")")).toBe("'=IMPORTXML(\"http://x\")");
     expect(cellValue("@cmd")).toBe("'@cmd");
+    expect(cellValue("-WcRcK")).toBe("'-WcRcK"); // random IDs can start with "-" → kept as text
     expect(cellValue("+HYPERLINK(1)")).toBe("'+HYPERLINK(1)");
     expect(cellValue("+918000000000")).toBe("+918000000000");
     expect(cellValue("-5")).toBe("-5");
@@ -161,7 +163,7 @@ describe("Google Sheets backup sync", () => {
 
     // Delegation row in legacy column order, formula text neutralised, legacy row untouched
     const [del] = findRow("DelegationMaster", 0, d.json.TaskID);
-    expect(del.slice(0, 3)).toEqual([d.json.TaskID, "Asha", "'=HYPERLINK(\"evil\")"]);
+    expect(del.slice(0, 3)).toEqual([d.json.TaskID, "Asha", "=HYPERLINK(\"evil\")"]); // stored as text (apostrophe consumed by Sheets)
     expect(del[10]).toBe("Completed");
     expect(del[11]).toBe("Boss");
     expect(rowsOf("DelegationMaster")[1]).toEqual(["OLD1", "Legacy Person", "kept as is"]);
@@ -294,7 +296,7 @@ describe("Google Sheets backup sync", () => {
     expect(q).toEqual([b.json.TaskID]);
     // second pull: nothing new
     const again = (await runSheetsPull(c, { force: true })).DelegationMaster as any;
-    expect(again.inserted).toBe(0); // idempotent: nothing new on a second pull
+    expect(again.unchanged ?? again.inserted === 0).toBe(true); // idempotent: sheet unchanged → skipped
     // next sync pushes the portal's version over the old-portal edit
     await runSheetsSync(c);
     expect(findRow("DelegationMaster", 0, b.json.TaskID)[0][2]).toBe("Edited in portal v2");
@@ -338,6 +340,85 @@ describe("Google Sheets backup sync", () => {
     const n = waits.length;
     await app.request("/api/delegations", { headers: { Authorization: `Bearer ${admin}` } }, c, ctx);
     expect(waits.length).toBe(n);
+  });
+
+  it("two-way for every tab: employee, checklist and training edits made in Sheets reach D1", async () => {
+    const c = await cfg();
+    const { admin, emp } = await tokens();
+    await api("POST", "/api/checklist/create-template", admin, { task: "Stock count", freq: "D", employeeName: "Asha" });
+    const tpl = await api("POST", "/api/training/templates", admin, { designation: "COMMON", name: "Fire safety", indices: [{ name: "Intro" }] });
+    await env.DB.prepare("UPDATE users SET updated_at = updated_at WHERE employee_id = 'SYEMP'").run(); // queue Asha
+    await runSheetsSync(c);
+    await runSheetsPull(c, { force: true }); // baseline fingerprints
+
+    // someone edits the Google Sheets by hand
+    const e = findRow("Employee", 0, "SYEMP")[0];
+    e[2] = "9999999999"; e[3] = "plaintext-typed-in-sheet"; e[10] = "Senior Accountant";
+    const task = rowsOf("Master").find((r) => r[1] === "Asha" && r[5] === "Stock count")!;
+    task[5] = "Stock count (edited in sheet)";
+    const ix = findRow("MasterTemplateData", 0, tpl.json.templateId)[0];
+    ix[2] = "Introduction"; ix[6] = "Approved";
+    tabs.get("MasterTemplateData")!.rows.push([tpl.json.templateId, "COMMON", "Evacuation", "", "", "100", "Approved", "Fire safety"]);
+
+    const r = await runSheetsPull(c, { force: true });
+    expect(r.Employee).toMatchObject({ updated: 1 });
+    const u = await env.DB.prepare("SELECT mobile, designation, password_hash FROM users WHERE employee_id='SYEMP'").first<any>();
+    expect(u).toMatchObject({ mobile: "9999999999", designation: "Senior Accountant" });
+    expect(u.password_hash.startsWith("pbkdf2$")).toBe(true); // never taken from the sheet
+    expect((await api("POST", "/api/auth/login", undefined, { employeeID: "SYEMP", password: "secret123" })).status).toBe(200);
+
+    const t = await env.DB.prepare("SELECT task FROM checklist_tasks WHERE task_id = ?").bind(task[3]).first<any>();
+    expect(t.task).toBe("Stock count (edited in sheet)");
+    expect((await api("GET", "/api/checklist", emp)).json.some((x: any) => x.Task === "Stock count (edited in sheet)")).toBe(true);
+
+    const tr = await env.DB.prepare("SELECT approval FROM training_templates WHERE template_id = ?").bind(tpl.json.templateId).first<any>();
+    expect(tr.approval).toBe("Approved");
+    const names = (await env.DB.prepare("SELECT index_name FROM training_indices WHERE template_id = ? ORDER BY position").bind(tpl.json.templateId).all<any>()).results.map((x) => x.index_name);
+    expect(names).toEqual(["Introduction", "Evacuation"]);
+
+    // nothing is echoed back, and an unchanged sheet is skipped cheaply
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM sheet_sync_queue").first<any>()).n).toBe(0);
+    const again = await runSheetsPull(c, { force: true });
+    expect(again.Employee).toMatchObject({ unchanged: true });
+    expect(again.Master).toMatchObject({ unchanged: true });
+  });
+
+  it("Sync Now button endpoint runs both directions and reports status", async () => {
+    const { admin } = await tokens();
+    const c = await cfg();
+    const res = await app.request("/api/sheets-sync/sync-now", { method: "POST", headers: { Authorization: `Bearer ${admin}` } }, c, { waitUntil: () => {}, passThroughOnException: () => {}, props: {} } as unknown as ExecutionContext);
+    const j = (await res.json()) as any;
+    expect(res.status).toBe(200);
+    expect(j).toHaveProperty("pull");
+    expect(j).toHaveProperty("push");
+    expect(j.status).toMatchObject({ enabled: true, pullEnabled: true, googleConfigured: true });
+  });
+
+  it("name-keyed tabs: \"Asha \" (stored) and \"Asha\" (sheet) are the same record — no duplicates either way", async () => {
+    const c = await cfg();
+    await env.DB.prepare("INSERT OR IGNORE INTO training_templates (template_id, designation, training_name, approval) VALUES ('TMP-SP','COMMON','Spaces','Approved')").run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO training_records (employee_name, template_id, template_name, status, progress) VALUES ('Asha ', 'TMP-SP', 'Spaces', 'In Progress', '{}')"),
+      env.DB.prepare("INSERT INTO additional_features (added_by, feature_name, feature_url) VALUES ('Asha ', 'Looker', 'https://looker.example')"),
+    ]);
+    await env.DB.prepare("DELETE FROM sheet_sync_queue").run();
+    // the sheet shows the trimmed spelling (as Sheets/legacy exports often do)
+    tabs.get("EmployeeTrainingData")!.rows.push(["Asha", "", "Spaces", "TMP-SP", "0", "0", "0", "0", "Completed", "", "", "", "", "", "", "{}"]);
+    tabs.get("AdditionalFeature")!.rows.push(["Asha", "Looker", "https://looker.example"]);
+
+    const r = await runSheetsPull(c, { force: true, full: true });
+    expect(r.EmployeeTrainingData).toMatchObject({ inserted: 0, updated: 1 });
+    expect(r.AdditionalFeature).toMatchObject({ inserted: 0 });
+    const recs = (await env.DB.prepare("SELECT employee_name, status FROM training_records WHERE template_id = 'TMP-SP'").all<any>()).results;
+    expect(recs).toEqual([{ employee_name: "Asha ", status: "Completed" }]); // stored spelling kept, value updated
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM additional_features WHERE feature_name = 'Looker'").first<any>()).n).toBe(1);
+
+    // push side: a portal edit of that record updates the existing sheet row (no appended duplicate)
+    await env.DB.prepare("UPDATE training_records SET status = 'In Progress' WHERE template_id = 'TMP-SP'").run();
+    await runSheetsSync(c);
+    const rows = rowsOf("EmployeeTrainingData").filter((x) => x[3] === "TMP-SP");
+    expect(rows).toHaveLength(1);
+    expect(rows[0][8]).toBe("In Progress");
   });
 });
 

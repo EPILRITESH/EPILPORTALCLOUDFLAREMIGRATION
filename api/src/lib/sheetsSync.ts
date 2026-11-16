@@ -7,6 +7,7 @@
 // Express backend wrote these sheets. Formula columns are never written.
 import type { Env } from "../types";
 import { a1Tab, appendRows, batchClear, batchGet, batchUpdate, googleConfigured, sheetProps } from "./google";
+import { normName } from "./util";
 
 type Row = unknown[];
 type SheetEnv = "GOOGLE_SHEET_ID" | "GOOGLE_SHEET_ID_CHECKLIST" | "GOOGLE_SHEET_ID_DELEGATION" | "GOOGLE_SHEET_ID_HELPTICKET"
@@ -21,6 +22,8 @@ export interface SheetSpec {
   /** Map a queue key to this sheet's key (null = not for this sheet). */
   sheetKey?: (queueKey: string) => string | null;
   keyCols: number[];                // 0-based columns forming the row key
+  /** positions (within keyCols) that hold person names → matched case/whitespace-insensitively */
+  nameKeyParts?: number[];
   segments: [number, number][];     // inclusive column ranges that are safe to write
   group?: boolean;                  // several rows share one key (training index rows)
   clearMissing?: boolean;           // clear sheet rows whose record no longer exists (default true)
@@ -51,7 +54,7 @@ export function cellValue(v: unknown): string | number {
 }
 
 // Employee!A:BW layout (legacy register route) — index → hr_details key
-const HR_AT: Record<number, string> = { 12: "gender", 13: "employeeType", 14: "workLocation", 15: "employeeStatus", 16: "shiftName", 20: "lunchBreak", 21: "weeklyOff", 22: "overtimeApplicable", 23: "overtimeRate", 24: "basicSalary", 25: "petrolAllowance", 26: "petrolAmount", 27: "foodAllowance", 28: "foodAmount", 29: "workingDays", 30: "pfApplicable", 31: "ptApplicable", 32: "advanceAllowed", 33: "advanceLimit", 34: "biometricId", 35: "graceTime", 36: "lateMarkAfter", 37: "halfDayAfter", 38: "minWorkingHours", 39: "punchRequired", 40: "autoAbsentAfter", 41: "paidLeave", 42: "casualLeave", 43: "sickLeave", 44: "earnedLeave", 45: "leaveCarryForward", 46: "leaveCarryMax", 47: "bankName", 48: "accountNumber", 49: "ifscCode", 50: "pfNumber", 51: "esicNumber", 53: "aadhaarNumber", 55: "panNumber", 57: "highestQualification", 58: "passingYear", 60: "previousCompany", 61: "previousDesignation", 62: "totalExperience", 64: "fatherName", 65: "motherName", 66: "spouseName", 67: "spouseDob", 68: "motherInLawName", 69: "fatherInLawName", 70: "emergencyContactName", 71: "emergencyContactNumber", 72: "permanentAddress", 73: "currentAddress", 74: "lastUpdatedAt" };
+export const HR_AT: Record<number, string> = { 12: "gender", 13: "employeeType", 14: "workLocation", 15: "employeeStatus", 16: "shiftName", 20: "lunchBreak", 21: "weeklyOff", 22: "overtimeApplicable", 23: "overtimeRate", 24: "basicSalary", 25: "petrolAllowance", 26: "petrolAmount", 27: "foodAllowance", 28: "foodAmount", 29: "workingDays", 30: "pfApplicable", 31: "ptApplicable", 32: "advanceAllowed", 33: "advanceLimit", 34: "biometricId", 35: "graceTime", 36: "lateMarkAfter", 37: "halfDayAfter", 38: "minWorkingHours", 39: "punchRequired", 40: "autoAbsentAfter", 41: "paidLeave", 42: "casualLeave", 43: "sickLeave", 44: "earnedLeave", 45: "leaveCarryForward", 46: "leaveCarryMax", 47: "bankName", 48: "accountNumber", 49: "ifscCode", 50: "pfNumber", 51: "esicNumber", 53: "aadhaarNumber", 55: "panNumber", 57: "highestQualification", 58: "passingYear", 60: "previousCompany", 61: "previousDesignation", 62: "totalExperience", 64: "fatherName", 65: "motherName", 66: "spouseName", 67: "spouseDob", 68: "motherInLawName", 69: "fatherInLawName", 70: "emergencyContactName", 71: "emergencyContactNumber", 72: "permanentAddress", 73: "currentAddress", 74: "lastUpdatedAt" };
 const DOC_AT: Record<string, number> = { bankPassbook: 52, aadhaarCard: 54, panCard: 56, educationCert: 59, experienceCert: 63 };
 
 async function loadUsers(env: Env, keys: string[], role: "employee" | "admin") {
@@ -82,7 +85,7 @@ export const SPECS: SheetSpec[] = [
   { id: "Admin", sheet: "GOOGLE_SHEET_ID", tab: "Admin", table: "users", sheetKey: prefixKey("admin:"),
     keyCols: [0], segments: [[0, 6]], load: (env, k) => loadUsers(env, k, "admin") },
   { id: "AdditionalFeature", sheet: "GOOGLE_SHEET_ID", tab: "AdditionalFeature", table: "additional_features",
-    keyCols: [0, 1, 2], segments: [[0, 3]], load: async (env, keys) => {
+    keyCols: [0, 1, 2], nameKeyParts: [0], segments: [[0, 3]], load: async (env, keys) => {
       const m = new Map<string, Row[]>();
       const rows = await selectIn<any>(env, (ph) => `SELECT * FROM additional_features WHERE (added_by || '|||' || feature_name || '|||' || feature_url) IN (${ph})`, keys);
       for (const r of rows) one(m, `${r.added_by}|||${r.feature_name}|||${r.feature_url}`, [r.added_by, r.feature_name, r.feature_url, r.created_at]);
@@ -169,7 +172,7 @@ export const SPECS: SheetSpec[] = [
       return m;
     } },
   { id: "EmployeeTrainingData", sheet: "GOOGLE_SHEET_ID_TRAINING", tab: "EmployeeTrainingData", table: "training_records",
-    keyCols: [0, 3], segments: [[0, 15]], load: async (env, keys) => {
+    keyCols: [0, 3], nameKeyParts: [0], segments: [[0, 15]], load: async (env, keys) => {
       const m = new Map<string, Row[]>();
       for (const r of await selectIn<any>(env, (ph) => `SELECT * FROM training_records WHERE (employee_name || '|||' || template_id) IN (${ph})`, keys)) {
         one(m, `${r.employee_name}|||${r.template_id}`, [r.employee_name, r.designation, r.template_name, r.template_id, r.document_score, r.video_score, r.qa_score, r.total_score, r.status, r.start_date, r.end_date, r.last_update, r.tools_documents, r.tools_translite, r.tools_summary, r.progress]);
@@ -180,6 +183,11 @@ export const SPECS: SheetSpec[] = [
 
 // ------------------------------------------------------------------ engine
 type Props = Awaited<ReturnType<typeof sheetProps>>;
+
+/** Comparable key: parts trimmed; person-name parts normalised (legacy "Mohammad Sami " == "Mohammad Sami"). */
+function matchKey(spec: SheetSpec, key: string): string {
+  return key.split("|||").map((part, i) => (spec.nameKeyParts?.includes(i) ? normName(part) : part.trim())).join("|||");
+}
 
 async function syncSpec(env: Env, spec: SheetSpec, keys: string[], propsCache: Map<string, Props>) {
   const sid = env[spec.sheet];
@@ -195,7 +203,7 @@ async function syncSpec(env: Env, spec: SheetSpec, keys: string[], propsCache: M
   const height = Math.max(0, ...cols.map((c) => c.length));
   const where = new Map<string, number[]>();
   for (let i = 0; i < height; i++) {
-    const key = spec.keyCols.map((_, j) => String(cols[j][i]?.[0] ?? "").trim()).join("|||");
+    const key = matchKey(spec, spec.keyCols.map((_, j) => String(cols[j][i]?.[0] ?? "")).join("|||"));
     if (!key.replace(/\|/g, "")) continue;
     if (!where.has(key)) where.set(key, []);
     where.get(key)!.push(i + 2);
@@ -208,7 +216,7 @@ async function syncSpec(env: Env, spec: SheetSpec, keys: string[], propsCache: M
   let next = height + 2;
   for (const key of keys) {
     const rows = want.get(key) || [];
-    const have = where.get(key.trim()) || [];
+    const have = where.get(matchKey(spec, key)) || [];
     if (!rows.length) { if (spec.clearMissing !== false) clears.push(...have); continue; }
     if (spec.group) {
       for (let i = 0; i < Math.max(rows.length, have.length); i++) {
@@ -340,8 +348,13 @@ export async function syncStatus(env: Env) {
   ]);
   return {
     enabled: syncEnabled(env),
+    pullEnabled: env.SHEETS_PULL_ENABLED === "true" && googleConfigured(env),
     googleConfigured: googleConfigured(env),
+    serverTime: new Date().toISOString(),
     pending: q.results,
     sheets: (s.results as any[]).map((r) => ({ sheet: r.name.slice(7), ...JSON.parse(r.value) })),
+    // admin convenience: open each backup tab in Google Sheets
+    links: Object.fromEntries([...SPECS.map((sp) => [sp.id, env[sp.sheet]]), ["EM report", env.GOOGLE_SHEET_ID_EMSHEET]]
+      .filter(([, id]) => id).map(([tab, id]) => [tab, `https://docs.google.com/spreadsheets/d/${id}/edit`])),
   };
 }

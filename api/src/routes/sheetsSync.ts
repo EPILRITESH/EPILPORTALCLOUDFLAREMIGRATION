@@ -27,9 +27,19 @@ sheetsSyncRoutes.post("/clear-queue", async (c) => {
   return c.json({ ok: true, removed: r.meta.changes });
 });
 
-/** POST /api/sheets-sync/pull — copy changes made directly in the sheets (old portal) into D1 now */
+/** POST /api/sheets-sync/sync-now — the "Sync Now" button: Sheets → DB, then DB → Sheets */
+sheetsSyncRoutes.post("/sync-now", async (c) => {
+  const started = Date.now();
+  const pull = await runSheetsPull(c.env, { force: true });
+  const push = await runSheetsSync(c.env, { force: true });
+  await audit(c.env, c.get("user").employeeID, "sync-now", "sheets_sync", "", { pull, push });
+  return c.json({ ok: true, ms: Date.now() - started, pull, push, status: await syncStatus(c.env) });
+});
+
+/** POST /api/sheets-sync/pull { full? } — copy edits made in the sheets into D1 now */
 sheetsSyncRoutes.post("/pull", async (c) => {
-  const r = await runSheetsPull(c.env, { force: true });
+  const { full } = await jsonBody(c.req);
+  const r = await runSheetsPull(c.env, { force: true, full: full === true });
   await audit(c.env, c.get("user").employeeID, "pull", "sheets_sync", "", r);
   return c.json({ ok: true, results: r });
 });

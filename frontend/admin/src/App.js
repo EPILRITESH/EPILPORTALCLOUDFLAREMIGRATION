@@ -11,6 +11,7 @@ import WorkList from "./pages/WorkList";
 import Training from "./pages/Training";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import SyncStatus from "./pages/SyncStatus";
 import { AuthContext } from "./context/AuthContext";
 
 export default function App() {
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="support-ticket" element={<SupportTicket />} />
         <Route path="worklist" element={<WorkList />} />
         <Route path="training" element={<Training />} />
+        <Route path="backup-sync" element={<SyncStatus />} />
         <Route path="*" element={<div>Page not found</div>} />
       </Route>
 

@@ -72,7 +72,7 @@ The legacy Google Sheets stay a live, human-readable backup of all data.
 
 ```
 portal write → D1 row → trigger → sheet_sync_queue ──(immediately after the save; cron every minute as safety net)──▶ legacy Google Sheets
-old portal / hand edits in Sheets ──(transition pull, every 5 minutes)──▶ D1   (portal wins on conflicts)
+hand edits in Sheets / old portal ──(pull, every minute, all tabs)──▶ D1   (portal wins on conflicts)
 EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 em_sheet_rows → /api/em-sheet
 ```
 - **Capture**: triggers on every synced table (migration 0003) record the changed row's key, so API
@@ -85,15 +85,20 @@ EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 e
   `Consolidated`, exactly as before; `SupportTicketsMaster` L/P/Q and `HelpTicketsMaster` I/J are skipped.
 - **Formula injection**: text starting with `=`, `@`, or a non-numeric `+`/`-` is written as plain text.
 - **Admin controls**: `GET /api/sheets-sync/status`, `POST /api/sheets-sync/run`,
-  `POST /api/sheets-sync/clear-queue`, `POST /api/sheets-sync/pull`, `POST /api/sheets-sync/backfill {since}`,
+  `POST /api/sheets-sync/clear-queue`, `POST /api/sheets-sync/sync-now`, `POST /api/sheets-sync/pull {full?}`, `POST /api/sheets-sync/backfill {since}`,
   `POST /api/sheets-sync/pull-em-sheet`.
 - **Real-time**: after every successful write the API pushes the queue in the background (a few
   seconds); the sync keeps draining while new changes arrive, and the every-minute cron catches anything left.
-- **Transition pull** (`api/src/lib/sheetsPull.ts`, `SHEETS_PULL_ENABLED`): while the old portal is still
-  used, new/changed rows in DelegationMaster, HelpTicketsMaster, SupportTicketsMaster, WorkList and new
-  completions in Consolidated are copied into D1 every 5 minutes. A record with a pending portal change is
-  never overwritten (portal wins); rows deleted in the sheet are not deleted in D1; the pull's own writes are
-  not echoed back. Turn it off once the old portal is retired.
+- **Pull** (`api/src/lib/sheetsPull.ts`, `SHEETS_PULL_ENABLED`): every minute, edits made in Google Sheets
+  (by hand or by the old portal) in **all** synced tabs are copied into D1 — Employee/Admin profiles,
+  delegations, checklist rows + completions (Consolidated), templates, tickets, worklist, training templates/
+  indices/questions/records, additional features. Each tab is fingerprinted in 500-row blocks and only changed
+  blocks are compared with D1 (first run ≈25 s for all tabs; later runs only touch what changed). A record with
+  a pending portal change is never overwritten (portal wins, checked atomically); rows deleted in a sheet are
+  not deleted in D1; passwords are never read from a sheet; person-name keys match ignoring case/whitespace;
+  the pull's own writes are not echoed back.
+- **Admin page**: Admin portal → **Backup & Sync** — live status per sheet, pending changes, last push/pull,
+  links to each sheet, and a **Sync Now** button (`POST /api/sheets-sync/sync-now`: pull, then push).
 - **Switches**: `SHEETS_SYNC_ENABLED` (D1 → Sheets) and `SHEETS_PULL_ENABLED` (Sheets → D1);
   `SHEETS_TAB_PREFIX` targets test/staging tabs (e.g. `ZZTEST_`).
 

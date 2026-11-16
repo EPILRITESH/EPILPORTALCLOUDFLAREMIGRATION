@@ -91,10 +91,11 @@ GitHub settings for automated deploys:
 ## Google Sheets backup (live since 16 Nov 2026)
 Both directions are ON in production (`api/wrangler.jsonc`):
 - `SHEETS_SYNC_ENABLED=true` — every portal change is written to the legacy sheets within seconds.
-- `SHEETS_PULL_ENABLED=true` — **transition mode**: changes made in the old portal are copied into D1
-  every 5 minutes (portal wins on conflicts).
+- `SHEETS_PULL_ENABLED=true` — edits made in the sheets (by hand or by the old portal) are copied into D1
+  every minute, for all tabs (portal wins on conflicts).
 
-When the old portal is retired: set `SHEETS_PULL_ENABLED` to `"false"` and deploy. Until then avoid
+Admins: **Admin portal → Backup & Sync** shows the live state and has a **Sync Now** button.
+While the old portal is still in use, avoid
 **deleting** delegations/worklists in the old portal — its delete rewrites the whole sheet range from
 its own cached copy, which can drop rows the new portal just added.
 

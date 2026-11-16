@@ -19,6 +19,8 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { setupFiles: ["./test/apply-migrations.ts"] },
+    // Test files share one D1 database; the Sheets-sync tests drain the shared sync queue,
+    // so files run one at a time (tests inside a file were already sequential).
+    test: { setupFiles: ["./test/apply-migrations.ts"], fileParallelism: false },
   };
 });
