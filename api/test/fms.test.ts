@@ -99,6 +99,23 @@ describe("FMS workflow", () => {
     await call("DELETE", `/api/fms/definitions/${id}`, { token: admin });
   });
 
+  it("accepts only registered departments / designations / employees", async () => {
+    const step = [{ name: "x", assign: { departments: ["MIS"] } }];
+    const bad = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Typo", access: { departments: ["Acounts"] }, steps: step } });
+    expect(bad.status).toBe(400);
+    expect(bad.json.errors.join(" ")).toMatch(/"Acounts" is not a registered department/);
+    const badEmp = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Ghost", access: { departments: ["MIS"] }, steps: [{ name: "x", assign: { employees: ["NOPE99"] } }] } });
+    expect(badEmp.json.errors.join(" ")).toMatch(/NOPE99/);
+    const ok = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Spelling", access: { designations: ["  ACCOUNTANT "] }, steps: step } });
+    expect(ok.status).toBe(201);
+    expect(ok.json.definition.access.designations).toEqual(["Accountant"]); // stored as registered
+    const seat = await call("POST", "/api/fms/seats", { token: admin, body: { code: "TYPO1", members: [{ kind: "designation", value: "Acountant" }] } });
+    expect(seat.status).toBe(400);
+    const imp = await call("POST", "/api/fms/seats/import", { token: admin, body: { rows: [{ code: "IMP1", kind: "department", value: "nowhere" }, { code: "IMP1", kind: "department", value: "accounts" }] } });
+    expect(imp.json.errors).toHaveLength(1);
+    await call("DELETE", `/api/fms/definitions/${ok.json.id}`, { token: admin });
+  });
+
   it("blocks doers from admin endpoints (RBAC)", async () => {
     for (const [m, p] of [
       ["GET", "/api/fms/definitions"], ["POST", "/api/fms/definitions"], ["GET", "/api/fms/seats"], ["POST", "/api/fms/seats"],

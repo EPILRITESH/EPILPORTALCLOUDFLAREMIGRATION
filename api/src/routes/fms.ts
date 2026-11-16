@@ -13,6 +13,7 @@ import { castResult, evaluate, FormulaError, FUNCTION_NAMES } from "../lib/fms/f
 import { actor, bundleOr404, idParam, mustView, page } from "../lib/fms/http";
 import { createRecord, createRecordsBulk, type RowInput } from "../lib/fms/records";
 import { analyzeGrid } from "../lib/fms/importer";
+import { checkDefinitionPeople } from "../lib/fms/people";
 import { fmsWorkRoutes } from "./fmsWork";
 import { fmsAdminRoutes } from "./fmsAdmin";
 
@@ -80,6 +81,7 @@ fmsRoutes.get("/definitions/:id", async (c) => {
 fmsRoutes.post("/definitions", requireAdmin, async (c) => {
   const body = await jsonBody<DefinitionInput>(c.req);
   const n = normaliseDefinition(body);
+  await checkDefinitionPeople(c.env, n);
   const id = await saveDefinition(c.env, n, actor(c).name);
   await audit(c.env, actor(c).employeeID, "create", "fms", String(id), { name: n.def.name });
   return c.json({ success: true, id, definition: await getDefinition(c.env, id) }, 201);
@@ -89,6 +91,7 @@ fmsRoutes.put("/definitions/:id", requireAdmin, async (c) => {
   const id = idParam(c);
   await bundleOr404(c, id);
   const n = normaliseDefinition(await jsonBody<DefinitionInput>(c.req));
+  await checkDefinitionPeople(c.env, n);
   await saveDefinition(c.env, n, actor(c).name, id);
   await audit(c.env, actor(c).employeeID, "update", "fms", String(id), { name: n.def.name });
   // formulas may have changed: recompute calculated columns of existing rows in the background
@@ -240,6 +243,7 @@ fmsRoutes.post("/import/commit", requireAdmin, async (c) => {
     s.seat_id = seat!.id;
   }
   const n = normaliseDefinition(def);
+  await checkDefinitionPeople(c.env, n);
   const id = await saveDefinition(c.env, n, actor(c).name);
   await audit(c.env, actor(c).employeeID, "import_create", "fms", String(id), { name: n.def.name, seats: createdSeats });
   return c.json({ success: true, id, createdSeats, definition: await getDefinition(c.env, id) }, 201);

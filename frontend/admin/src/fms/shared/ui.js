@@ -83,8 +83,9 @@ export const Label = ({ children, required }) => <label className="mb-1 block te
 /** Tag-style multi select from a list (with free typing when allowCustom). */
 export function MultiPick({ options = [], value = [], onChange, placeholder = "Add…", allowCustom }) {
   const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
   const opts = options.map((o) => (typeof o === "string" ? { value: o, label: o } : o));
-  const avail = opts.filter((o) => !value.includes(o.value) && o.label.toLowerCase().includes(q.toLowerCase())).slice(0, 50);
+  const avail = opts.filter((o) => !value.includes(o.value) && o.label.toLowerCase().includes(q.toLowerCase())).slice(0, 100);
   const add = (v) => { if (v && !value.includes(v)) onChange([...value, v]); setQ(""); };
   return (
     <div className="rounded-md border border-gray-300 p-1.5">
@@ -96,12 +97,14 @@ export function MultiPick({ options = [], value = [], onChange, placeholder = "A
           </span>
         ))}
         <div className="relative min-w-[8rem] flex-1">
-          <input className="w-full px-1 py-0.5 text-sm outline-none" value={q} placeholder={placeholder} onChange={(e) => setQ(e.target.value)}
+          <input className="w-full px-1 py-0.5 text-sm outline-none" value={q} placeholder={placeholder} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (avail[0]) add(avail[0].value); else if (allowCustom && q.trim()) add(q.trim()); } }} />
-          {q && (avail.length > 0 || allowCustom) && (
+          {(open || q) && (avail.length > 0 || (allowCustom && q.trim()) || (!allowCustom && q)) && (
             <div className="absolute z-30 mt-1 max-h-56 w-64 overflow-y-auto rounded-md border bg-white shadow-lg">
-              {avail.map((o) => <button type="button" key={o.value} className="block w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50" onClick={() => add(o.value)}>{o.label}</button>)}
-              {allowCustom && q.trim() && !opts.some((o) => o.value === q.trim()) && <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-blue-700 hover:bg-blue-50" onClick={() => add(q.trim())}>Add “{q.trim()}”</button>}
+              {avail.map((o) => <button type="button" key={o.value} className="block w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50" onMouseDown={(e) => e.preventDefault()} onClick={() => add(o.value)}>{o.label}</button>)}
+              {!allowCustom && q && !avail.length && <div className="px-3 py-1.5 text-sm text-gray-500">No registered match</div>}
+              {allowCustom && q.trim() && !opts.some((o) => o.value === q.trim()) && <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-blue-700 hover:bg-blue-50" onMouseDown={(e) => e.preventDefault()} onClick={() => add(q.trim())}>Add “{q.trim()}”</button>}
             </div>
           )}
         </div>

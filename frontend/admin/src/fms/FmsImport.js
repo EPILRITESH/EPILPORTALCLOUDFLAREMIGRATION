@@ -123,8 +123,8 @@ export default function FmsImport() {
               <Label required>Visible to — department / designation</Label>
               <p className="mb-2 text-xs text-gray-600">Only doers of these departments or designations will see this FMS (select at least one).</p>
               <div className="grid gap-2 md:grid-cols-2">
-                <div><Label>Departments</Label><MultiPick allowCustom options={lk.departments} value={access.departments || []} onChange={(v) => setDef({ ...def, access: { ...access, departments: v } })} /></div>
-                <div><Label>Designations</Label><MultiPick allowCustom options={lk.designations} value={access.designations || []} onChange={(v) => setDef({ ...def, access: { ...access, designations: v } })} /></div>
+                <div><Label>Departments</Label><MultiPick placeholder="Choose department…" options={lk.departments} value={access.departments || []} onChange={(v) => setDef({ ...def, access: { ...access, departments: v } })} /></div>
+                <div><Label>Designations</Label><MultiPick placeholder="Choose designation…" options={lk.designations} value={access.designations || []} onChange={(v) => setDef({ ...def, access: { ...access, designations: v } })} /></div>
               </div>
             </div>
           </div>

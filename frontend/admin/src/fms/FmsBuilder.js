@@ -81,8 +81,8 @@ function WhoPicker({ value, onChange, lk, withSeat = true }) {
         </div>
       )}
       <div className={withSeat ? "rounded-md bg-green-50 p-1.5 md:col-span-2" : ""}><Label>{withSeat ? "Doer — employee name(s)" : "Employees"}</Label><MultiPick options={lk.employees.map((e) => ({ value: e.employee_id, label: `${e.name} (${e.department || "—"}${e.designation ? `, ${e.designation}` : ""})` }))} value={v.employees || []} onChange={(x) => onChange({ ...v, employees: x })} placeholder="Type a name…" /></div>
-      <div><Label>{withSeat ? "or Departments" : "Departments"}</Label><MultiPick options={lk.departments} value={v.departments || []} onChange={(x) => onChange({ ...v, departments: x })} allowCustom /></div>
-      <div><Label>{withSeat ? "or Designations" : "Designations"}</Label><MultiPick options={lk.designations} value={v.designations || []} onChange={(x) => onChange({ ...v, designations: x })} allowCustom /></div>
+      <div><Label>{withSeat ? "or Departments" : "Departments"}</Label><MultiPick options={lk.departments} value={v.departments || []} onChange={(x) => onChange({ ...v, departments: x })} placeholder="Choose department…" /></div>
+      <div><Label>{withSeat ? "or Designations" : "Designations"}</Label><MultiPick options={lk.designations} value={v.designations || []} onChange={(x) => onChange({ ...v, designations: x })} placeholder="Choose designation…" /></div>
     </div>
   );
 }

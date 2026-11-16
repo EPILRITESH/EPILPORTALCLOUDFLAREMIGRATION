@@ -42,8 +42,11 @@ function SeatEditor({ seat, lk, onClose, onSaved }) {
                 </select>
               ) : (
                 <>
-                  <input className={inputCls} list={`opts-${m.kind}`} value={m.value} onChange={(e) => setM(i, { value: e.target.value })} placeholder={`Type ${m.kind}`} />
-                  <datalist id={`opts-${m.kind}`}>{(valueOptions(m.kind) || []).map((o) => <option key={o} value={o} />)}</datalist>
+                  <select className={inputCls} value={m.value} onChange={(e) => setM(i, { value: e.target.value })}>
+                    <option value="">— choose {m.kind} —</option>
+                    {m.value && !(valueOptions(m.kind) || []).includes(m.value) && <option value={m.value}>{m.value} (no active employee)</option>}
+                    {(valueOptions(m.kind) || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                 </>
               )}
             </div>

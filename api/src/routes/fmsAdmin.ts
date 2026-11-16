@@ -8,6 +8,7 @@ import { audit } from "../lib/audit";
 import { j, resolvePeople, seatMatches, loadSeats } from "../lib/fms/engine";
 import { runFmsRecurrence, runFmsReminders } from "../lib/fms/cron";
 import { actor, idParam } from "../lib/fms/http";
+import { canonMember, loadDirectory } from "../lib/fms/people";
 
 export const fmsAdminRoutes = new Hono<AppEnv>();
 const nowIso = () => new Date().toISOString();
@@ -46,6 +47,15 @@ function cleanMembers(list: unknown): MemberIn[] {
   return out;
 }
 
+/** Members must be registered departments / designations / active employees (normalised spelling). */
+async function registered(c: any, members: MemberIn[]) {
+  const dir = await loadDirectory(c.env);
+  const errors: string[] = [];
+  const out = members.map((m, i) => ({ ...m, value: canonMember(dir, m.kind, m.value, `Member ${i + 1}`, errors) }));
+  if (errors.length) fail(400, errors[0], { errors });
+  return out;
+}
+
 async function seatList(c: any, id?: number) {
   const [s, m, used] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT * FROM fms_seats ${id ? "WHERE id = ?" : ""} ORDER BY code COLLATE NOCASE`).bind(...(id ? [id] : [])),
@@ -77,7 +87,7 @@ fmsAdminRoutes.post("/seats", requireAdmin, async (c) => {
   const code = str(b.code).trim();
   if (!code) fail(400, "Seat code is required (e.g. CRM, PC-1)");
   if (await c.env.DB.prepare("SELECT 1 FROM fms_seats WHERE code = ?").bind(code).first()) fail(409, `Seat "${code}" already exists`);
-  const members = cleanMembers(b.members);
+  const members = await registered(c, cleanMembers(b.members));
   const r = await c.env.DB.prepare("INSERT INTO fms_seats (code, name, description, active) VALUES (?, ?, ?, ?) RETURNING id")
     .bind(code, str(b.name).trim() || code, str(b.description), b.active === false ? 0 : 1).first<{ id: number }>();
   await writeMembers(c, r!.id, members);
@@ -92,7 +102,7 @@ fmsAdminRoutes.put("/seats/:id", requireAdmin, async (c) => {
   const b = await jsonBody(c.req);
   const code = str(b.code).trim() || cur.code;
   if (await c.env.DB.prepare("SELECT 1 FROM fms_seats WHERE code = ? AND id != ?").bind(code, id).first()) fail(409, `Seat "${code}" already exists`);
-  const members = b.members !== undefined ? cleanMembers(b.members) : null;
+  const members = b.members !== undefined ? await registered(c, cleanMembers(b.members)) : null;
   const before = (await seatList(c, id))[0];
   await c.env.DB.prepare("UPDATE fms_seats SET code = ?, name = ?, description = ?, active = ?, updated_at = ? WHERE id = ?")
     .bind(code, str(b.name ?? cur.name).trim() || code, str(b.description ?? cur.description), b.active === undefined ? cur.active : b.active ? 1 : 0, nowIso(), id).run();
@@ -132,6 +142,7 @@ fmsAdminRoutes.post("/seats/import", requireAdmin, async (c) => {
   if (!rows.length) fail(400, "No rows to import");
   const errors: { row: number; error: string }[] = [];
   const bySeat = new Map<string, { code: string; name: string; members: MemberIn[] }>();
+  const dir = await loadDirectory(c.env);
   rows.forEach((r: any, i: number) => {
     const code = str(r.code ?? r.seat ?? r.Seat).trim();
     if (!code) { errors.push({ row: i + 1, error: "Seat code missing" }); return; }
@@ -140,7 +151,12 @@ fmsAdminRoutes.post("/seats/import", requireAdmin, async (c) => {
     const kind = str(r.kind ?? r.type).trim().toLowerCase();
     const value = str(r.value).trim();
     if (!kind && !value) return; // seat without members
-    try { g.members.push(...cleanMembers([{ kind, value, start_date: str(r.start_date), end_date: str(r.end_date) }])); }
+    try {
+      const [m] = cleanMembers([{ kind, value, start_date: str(r.start_date), end_date: str(r.end_date) }]);
+      const errs: string[] = [];
+      m.value = canonMember(dir, m.kind, m.value, `Row ${i + 1}`, errs);
+      if (errs.length) errors.push({ row: i + 1, error: errs[0] }); else g.members.push(m);
+    }
     catch (e: any) { errors.push({ row: i + 1, error: (e?.message as string) || "Invalid member" }); }
   });
   let created = 0, updated = 0;
