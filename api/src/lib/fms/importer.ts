@@ -159,6 +159,25 @@ export function analyzeGrid(grid: Cell[][], opts: { name?: string; maxPreview?: 
     stepCols.push({ planned, actual, status, inputs });
   });
 
+  // status options that jump ahead, like "Close" on a follow-up step: rows with that status leave the next
+  // steps empty and continue at a later step (e.g. PC verification) → {"Close": 5}
+  const filled = (r: Cell[], c: number) => c >= 0 && S(r[c]) !== "";
+  stepCols.forEach((sc, i) => {
+    if (sc.status < 0) return;
+    const jumps: Record<string, number> = {};
+    for (const v of steps[i].status_options || []) {
+      const rows = dataRows.filter((r) => S(r[sc.status]) === v);
+      if (rows.length < 3) continue;
+      for (let t = i + 2; t < stepCols.length; t++) {
+        const reached = rows.filter((r) => filled(r, stepCols[t].actual)).length / rows.length;
+        const between = stepCols.slice(i + 1, t).every((x) => rows.filter((r) => filled(r, x.actual)).length / rows.length <= 0.05);
+        if (reached >= 0.8 && between) { jumps[v] = t + 1; break; }
+        if (!between) break;
+      }
+    }
+    if (Object.keys(jumps).length) steps[i].jumps = jumps;
+  });
+
   // start column: the first date-time column named like "Date & Time"/"Timestamp"
   const startField = fields.find((f) => f.type === "datetime" && /date\s*&\s*time/i.test(f.label)) || fields.find((f) => f.type === "datetime" || f.type === "date");
   // working hours from the top row (EPIL sheets keep 10 and 19 there)

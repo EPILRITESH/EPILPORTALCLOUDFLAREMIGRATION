@@ -17,7 +17,7 @@ export interface DefRow {
 }
 export interface StepRow {
   id: number; fms_id: number; position: number; code: string; name: string; seat_id: number | null; assign: string; how: string;
-  tat: string; condition: string; requires_approval: number; approver: string; status_options: string; reminder: string; escalation: string;
+  tat: string; condition: string; requires_approval: number; approver: string; status_options: string; reminder: string; escalation: string; jumps: string;
 }
 export interface FieldRow {
   id: number; fms_id: number; step_id: number | null; key: string; label: string; type: string; options: string;
@@ -228,6 +228,15 @@ export async function progress(env: Env, b: Bundle, recordId: number, actor: Act
   }
   await env.DB.prepare("UPDATE fms_records SET status = 'completed', current_step = 0, completed_at = ?, updated_at = ? WHERE id = ?").bind(nowIso(), nowIso(), recordId).run();
   await history(env, recordId, null, "completed", null);
+}
+
+/** A status option with a jump (e.g. "Close" → STEP-5) skips the waiting steps in between. */
+export async function applyJump(env: Env, b: Bundle, recordId: number, step: StepRow, outcome: string, actor: Actor | null) {
+  const to = Number(j<Record<string, number>>(step.jumps, {})[outcome] || 0);
+  if (!to || to <= step.position + 1) return;
+  const r = await env.DB.prepare("UPDATE fms_record_steps SET status = 'skipped', updated_at = ? WHERE record_id = ? AND position > ? AND position < ? AND status = 'waiting' RETURNING id")
+    .bind(nowIso(), recordId, step.position, to).all<{ id: number }>();
+  if (r.results.length) await history(env, recordId, null, "jumped", actor, `${outcome} → ${b.steps.find((s) => s.position === to)?.code || `STEP-${to}`}`, { skipped: r.results.length });
 }
 
 export const delayMinutes = (planned: string, actual: string) => {

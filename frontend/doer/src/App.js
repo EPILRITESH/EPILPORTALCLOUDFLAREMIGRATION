@@ -13,6 +13,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { AuthContext } from "./context/AuthContext";
 import AdditionalFeature from "./pages/AdditionalFeature"
+import { FmsHome, MyTasks, MyApprovals, FmsSheet } from "./fms/FmsPages";
 
 export default function App() {
   const { user } = useContext(AuthContext);
@@ -42,6 +43,10 @@ export default function App() {
         <Route path="additional-feature" element={<AdditionalFeature />} />
         <Route path="worklist" element={<WorkList />} />
         <Route path="training" element={<Training />} />
+        <Route path="fms" element={<FmsHome />} />
+        <Route path="fms/tasks" element={<MyTasks />} />
+        <Route path="fms/approvals" element={<MyApprovals />} />
+        <Route path="fms/sheet/:id" element={<FmsSheet />} />
 
         <Route path="*" element={<div>Page not found</div>} />
       </Route>

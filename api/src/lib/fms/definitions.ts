@@ -17,6 +17,8 @@ export interface StepInput {
   tat?: { type?: string; value?: number; field?: string; from?: string }; condition?: { field: string; op: string; value?: unknown } | null;
   requires_approval?: boolean; approver?: Record<string, unknown>; status_options?: string[]; reminder?: Record<string, unknown>;
   escalation?: Record<string, unknown>; fields?: FieldInput[];
+  /** status option → step position to continue at (steps in between are skipped), e.g. {"Close": 5} */
+  jumps?: Record<string, number>;
 }
 export interface DefinitionInput {
   name: string; code?: string; category?: string; description?: string; instructions?: string; priority?: string; status?: string;
@@ -70,10 +72,18 @@ export function normaliseDefinition(input: DefinitionInput) {
     if (!seatId && !assign.departments.length && !assign.designations.length && !assign.employees.length) errors.push(`${where} (${str(s.name)}): choose WHO — a seat, department, designation or employee`);
     const approver = { ...spec(s.approver), seat_id: s.approver && (s.approver as any).seat_id ? Number((s.approver as any).seat_id) : null };
     const statusOptions = strList(s.status_options);
+    const jumps: Record<string, number> = {};
+    for (const [opt, to] of Object.entries(s.jumps && typeof s.jumps === "object" ? s.jumps : {})) {
+      const n = Number(to);
+      if (!opt || !n) continue;
+      if (!statusOptions.includes(opt)) errors.push(`${where}: "${opt}" is not one of its status options`);
+      else if (!Number.isInteger(n) || n <= i + 2 || n > (input.steps || []).length) errors.push(`${where}: "${opt}" must jump to a later step (STEP-${i + 3} or after)`);
+      else jumps[opt] = n;
+    }
     return {
       id: s.id, name: str(s.name).trim(), code: str(s.code).trim() || `STEP-${i + 1}`, seat_id: seatId, assign, how: str(s.how), tat, condition,
       requires_approval: !!s.requires_approval, approver, status_options: statusOptions.length ? statusOptions : ["Done"],
-      reminder: s.reminder || {}, escalation: s.escalation || {}, fields: (s.fields || []).map((f, k) => normField(f, `${where} input ${k + 1}`)),
+      reminder: s.reminder || {}, escalation: s.escalation || {}, jumps, fields: (s.fields || []).map((f, k) => normField(f, `${where} input ${k + 1}`)),
     };
   });
   const allKeys = new Set([...fields.map((f) => f.key), ...steps.flatMap((s) => s.fields.map((f) => f.key))]);
@@ -116,7 +126,7 @@ export async function getDefinition(env: Env, id: number) {
     steps: (st.results as StepRow[]).map((s) => ({
       id: s.id, position: s.position, code: s.code, name: s.name, seat_id: s.seat_id, assign: j(s.assign, {}), how: s.how, tat: j(s.tat, {}),
       condition: j(s.condition, null), requires_approval: !!s.requires_approval, approver: j(s.approver, {}), status_options: j(s.status_options, ["Done"]),
-      reminder: j(s.reminder, {}), escalation: j(s.escalation, {}), fields: fields.filter((f) => f.step_id === s.id).map(outField),
+      reminder: j(s.reminder, {}), escalation: j(s.escalation, {}), jumps: j<Record<string, number>>(s.jumps, {}), fields: fields.filter((f) => f.step_id === s.id).map(outField),
     })),
   };
 }
@@ -166,14 +176,14 @@ export async function saveDefinition(env: Env, n: Normalised, by: string, existi
   for (let i = 0; i < n.steps.length; i++) {
     const s = n.steps[i];
     const vals = [i + 1, s.code, s.name, s.seat_id, JSON.stringify(s.assign), s.how, JSON.stringify(s.tat), s.condition ? JSON.stringify(s.condition) : "",
-      s.requires_approval ? 1 : 0, JSON.stringify(s.approver), JSON.stringify(s.status_options), JSON.stringify(s.reminder), JSON.stringify(s.escalation)];
+      s.requires_approval ? 1 : 0, JSON.stringify(s.approver), JSON.stringify(s.status_options), JSON.stringify(s.reminder), JSON.stringify(s.escalation), JSON.stringify(s.jumps)];
     if (s.id && keep.has(s.id)) {
       await db.prepare(`UPDATE fms_steps SET position = ?, code = ?, name = ?, seat_id = ?, assign = ?, how = ?, tat = ?, condition = ?, requires_approval = ?, approver = ?,
-        status_options = ?, reminder = ?, escalation = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).bind(...vals, s.id).run();
+        status_options = ?, reminder = ?, escalation = ?, jumps = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).bind(...vals, s.id).run();
       stepIds.push(s.id);
     } else {
-      const r = await db.prepare(`INSERT INTO fms_steps (fms_id, position, code, name, seat_id, assign, how, tat, condition, requires_approval, approver, status_options, reminder, escalation)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(id, ...vals).first<{ id: number }>();
+      const r = await db.prepare(`INSERT INTO fms_steps (fms_id, position, code, name, seat_id, assign, how, tat, condition, requires_approval, approver, status_options, reminder, escalation, jumps)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(id, ...vals).first<{ id: number }>();
       stepIds.push(r!.id);
       // existing rows: new step is skipped where the row already passed that point, waiting otherwise
       await db.prepare(`INSERT OR IGNORE INTO fms_record_steps (record_id, step_id, position, status)

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
-import { FaTasks, FaClipboardList, FaLifeRing, FaHeadset, FaBars, FaTimes, FaCodeBranch, FaList, FaUserPlus, FaSync } from "react-icons/fa";
+import { FaTasks, FaClipboardList, FaLifeRing, FaHeadset, FaBars, FaTimes, FaCodeBranch, FaList, FaUserPlus, FaSync, FaProjectDiagram } from "react-icons/fa";
 import axios from "axios";
 
 // MenuItem Component
@@ -152,6 +152,7 @@ export default function Sidebar({ mobile }) {
             </MenuItem>
             <MenuItem to="/worklist" icon={FaList} onClick={closeSidebar}>WorkList</MenuItem>
             <MenuItem to="/training" icon={FaClipboardList} onClick={closeSidebar}>Training</MenuItem>
+            <MenuItem to="/fms" icon={FaProjectDiagram} onClick={closeSidebar}>FMS</MenuItem>
             <MenuItem to="/backup-sync" icon={FaSync} onClick={closeSidebar}>Backup &amp; Sync</MenuItem>
             <MenuItem to="/register" icon={FaUserPlus} onClick={closeSidebar}>Add Admin</MenuItem>
           </nav>
@@ -192,6 +193,7 @@ export default function Sidebar({ mobile }) {
         </MenuItem>
         <MenuItem to="/worklist" icon={FaList} count={0}>WorkList</MenuItem>
         <MenuItem to="/training" icon={FaClipboardList} count={0}>Training</MenuItem>
+        <MenuItem to="/fms" icon={FaProjectDiagram} count={0}>FMS</MenuItem>
         <MenuItem to="/backup-sync" icon={FaSync} count={0}>Backup &amp; Sync</MenuItem>
         <MenuItem to="/register" icon={FaUserPlus} count={0}>Add Admin</MenuItem>
       </nav>

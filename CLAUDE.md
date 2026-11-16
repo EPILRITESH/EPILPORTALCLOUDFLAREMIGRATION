@@ -10,6 +10,7 @@ Read this before changing anything.
 | `api/migrations/` | D1 schema migrations (forward-only, numbered) | `wrangler d1 migrations` |
 | `frontend/doer/` | Employee ("Doer") portal — React 19 (CRA) + Tailwind | Workers static assets |
 | `frontend/admin/` | Admin portal — React 19 (CRA) + Tailwind | Workers static assets |
+| `frontend/shared/fms/` | FMS components shared by both apps — edit here, then `node frontend/sync-shared.mjs` | — |
 | `migration/` | One-time Google Sheets → D1 and Cloudinary → R2 tooling | Node 22 |
 | `docs/` | Architecture, data mapping, runbooks, legacy differences | — |
 

@@ -5,7 +5,7 @@ import { fail, str } from "../util";
 import { coerceValues } from "./definitions";
 import { parseInstant, istDay } from "./calendar";
 import {
-  admins, canActOn, canApprove, delayMinutes, history, j, loadBundle, loadSeats, notify, progress, resolvePeople, stepEligible,
+  admins, applyJump, canActOn, canApprove, delayMinutes, history, j, loadBundle, loadSeats, notify, progress, resolvePeople, stepEligible,
   type Actor, type AssignSpec, type Bundle, type RecordStepRow, type Seat, type StepRow,
 } from "./engine";
 
@@ -81,6 +81,7 @@ export async function completeStep(env: Env, ctx: StepCtx, u: Actor, body: { val
     delay_minutes = ?, rejection_reason = '', updated_at = ? WHERE id = ?`)
     .bind(outcome, JSON.stringify(values), remarks, t, t, u.employeeID, u.name, delayMinutes(ctx.rs.planned_at, t), t, ctx.rs.id).run();
   await history(env, ctx.rec.id, ctx.rs.id, "completed", u, remarks, { outcome });
+  await applyJump(env, ctx.b, ctx.rec.id, ctx.step, outcome, u);
   await progress(env, ctx.b, ctx.rec.id, u);
   return { status: "done" };
 }
@@ -97,6 +98,7 @@ export async function approveStep(env: Env, ctx: StepCtx, u: Actor, remarks: str
   await env.DB.prepare(`UPDATE fms_record_steps SET status = 'done', actual_at = ?, approved_by = ?, approved_at = ?, delay_minutes = ?, updated_at = ? WHERE id = ?`)
     .bind(actual, u.name, t, delayMinutes(ctx.rs.planned_at, actual), t, ctx.rs.id).run();
   await history(env, ctx.rec.id, ctx.rs.id, "approved", u, remarks);
+  await applyJump(env, ctx.b, ctx.rec.id, ctx.step, ctx.rs.outcome, u);
   if (ctx.rs.done_by) await notify(env, [{ employeeID: ctx.rs.done_by }], { kind: "approved", title: `Approved: ${ctx.step.name}`, body: `${ctx.b.def.name} · ${ctx.rec.uid}`, fms_id: ctx.b.def.id, record_id: ctx.rec.id, record_step_id: ctx.rs.id });
   await progress(env, ctx.b, ctx.rec.id, u);
 }

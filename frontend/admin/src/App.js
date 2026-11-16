@@ -12,6 +12,11 @@ import Training from "./pages/Training";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import SyncStatus from "./pages/SyncStatus";
+import { FmsList, FmsData, FmsApprovals } from "./fms/FmsAdmin";
+import FmsBuilder from "./fms/FmsBuilder";
+import FmsImport from "./fms/FmsImport";
+import FmsSeating from "./fms/Seating";
+import FmsReports from "./fms/Reports";
 import { AuthContext } from "./context/AuthContext";
 
 export default function App() {
@@ -42,6 +47,14 @@ export default function App() {
         <Route path="worklist" element={<WorkList />} />
         <Route path="training" element={<Training />} />
         <Route path="backup-sync" element={<SyncStatus />} />
+        <Route path="fms" element={<FmsList />} />
+        <Route path="fms/new" element={<FmsBuilder />} />
+        <Route path="fms/import" element={<FmsImport />} />
+        <Route path="fms/seating" element={<FmsSeating />} />
+        <Route path="fms/approvals" element={<FmsApprovals />} />
+        <Route path="fms/reports" element={<FmsReports />} />
+        <Route path="fms/:id" element={<FmsData />} />
+        <Route path="fms/:id/edit" element={<FmsBuilder />} />
         <Route path="*" element={<div>Page not found</div>} />
       </Route>
 

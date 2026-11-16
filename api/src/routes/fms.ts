@@ -491,6 +491,8 @@ fmsRoutes.get("/records/:rid", async (c) => {
     history: (hist.results as any[]).map((h) => ({ ...h, detail: j(h.detail, {}) })),
     comments: com.results, attachments: att.results,
     fms: { id: b.def.id, fms_id: b.def.fms_id, code: b.def.code, name: b.def.name, instructions: b.def.instructions },
+    // the setup needed to render the row and its step forms (doers may lack access to /definitions/:id)
+    definition: await (async () => { const d = (await getDefinition(c.env, b.def.id))!; return { fields: d.fields, steps: d.steps, seats: [...b.seats.values()].map((s) => ({ id: s.id, code: s.code, name: s.name })) }; })(),
   });
 });
 

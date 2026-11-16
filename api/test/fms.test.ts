@@ -299,11 +299,50 @@ describe("FMS import (auto-create from a sheet)", () => {
     expect(rows[1].steps.map((s: any) => s.status)).toEqual(["pending", "waiting"]);
     expect(rows[1].data.date_time).toBe("2026-01-06T06:30:00.000Z"); // wall-clock IST normalised
 
+    // new rows continue after the imported UIDs
+    const fresh = await call("POST", `/api/fms/definitions/${id}/records`, { token: admin, body: { data: { date_time: "2026-01-07 10:00", dealer_name: "C", delivery_date: "2026-01-20" } } });
+    expect(fresh.json.uid).toBe("UID-9");
+
     const again = await call("POST", `/api/fms/definitions/${id}/records/import`, { token: admin, body: { rows: an.json.rows, dedupe: { fields: ["uid"], action: "skip" } } });
     expect(again.json.created).toHaveLength(0);
     expect(again.json.duplicates).toHaveLength(3);
+    expect(again.json.created).toHaveLength(0);
     const dupes = await call("GET", `/api/fms/definitions/${id}/duplicates?fields=dealer_name`, { token: admin });
     expect(dupes.json.totalGroups).toBe(0);
+  });
+
+  it("detects 'Close' jumps and treats passed-over steps as skipped", async () => {
+    const head = ["Date & Time", "Dealer Name", "Planned", "Actual", "Status", "Planned", "Actual", "Status", "Planned", "Actual", "Status", "UID"];
+    const g: any[] = [
+      ["", "JUMP FMS"], ["", "", "STEP-1", "", "", "STEP-2", "", "", "STEP-3"],
+      ["WHAT", "", "Follow up", "", "", "Follow up 2", "", "", "Verify"], ["WHO", "", "CRMIMP", "", "", "CRMIMP", "", "", "PC-9"], ["HOW"], ["WHEN", "", 1, "", "", 1, "", "", 5], head,
+    ];
+    for (let i = 0; i < 5; i++) g.push([`2026-01-0${i + 1} 10:00:00`, `D${i}`, "", "2026-01-02 10:00:00", "Close", "", "", "", "", "2026-01-05 10:00:00", "Done", `J-${i}`]);
+    g.push(["2026-01-09 10:00:00", "D9", "", "2026-01-10 10:00:00", "Done", "", "", "", "", "", "", "J-9"]);
+    const a = analyzeGrid(g);
+    expect(a.definition.steps[0].jumps).toEqual({ Close: 3 });
+    const cm = await call("POST", "/api/fms/import/commit", { token: admin, body: { definition: { ...a.definition, uid_prefix: "J-" } } });
+    expect(cm.status, JSON.stringify(cm.json)).toBe(201);
+    const id = cm.json.id;
+    await call("POST", `/api/fms/definitions/${id}/records/import`, { token: admin, body: { rows: a.rows } });
+    const rows = (await call("GET", `/api/fms/definitions/${id}/records?sort=uid&dir=asc&limit=100`, { token: admin })).json.items;
+    expect(rows[0].status).toBe("completed");
+    expect(rows[0].steps.map((s: any) => s.status)).toEqual(["done", "skipped", "done"]);
+    const open = rows.find((r: any) => r.uid === "J-9");
+    expect(open.steps.map((s: any) => s.status)).toEqual(["done", "pending", "waiting"]);
+
+    // live: choosing "Close" on STEP-1 jumps to STEP-3
+    await call("POST", "/api/fms/seats", { token: admin, body: { code: "CRMJ", members: [{ kind: "employee", value: "FEMP1" }] } }).catch(() => {});
+    const r = await call("POST", `/api/fms/definitions/${id}/records`, { token: admin, body: { data: { dealer_name: "LIVE" } } });
+    expect(r.json.uid).toBe("J-10");
+    let rec = (await call("GET", `/api/fms/records/${r.json.id}`, { token: admin })).json.record;
+    expect((await call("POST", `/api/fms/steps/${rec.steps[0].id}/complete`, { token: admin, body: { outcome: "Close" } })).status).toBe(200);
+    rec = (await call("GET", `/api/fms/records/${r.json.id}`, { token: admin })).json.record;
+    expect(rec.steps.map((s: any) => s.status)).toEqual(["done", "skipped", "pending"]);
+
+    const bad = (await call("GET", `/api/fms/definitions/${id}`, { token: admin })).json.definition;
+    bad.steps[0].jumps = { Close: 2 };
+    expect((await call("PUT", `/api/fms/definitions/${id}`, { token: admin, body: bad })).status).toBe(400);
   });
 
   it("creates rows for recurring FMS once per period", async () => {

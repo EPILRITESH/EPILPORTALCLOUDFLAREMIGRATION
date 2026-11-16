@@ -13,9 +13,28 @@ export interface RowInput {
 }
 
 async function allocUids(env: Env, b: Bundle, n: number): Promise<string[]> {
-  const r = await env.DB.prepare("UPDATE fms_definitions SET next_uid = next_uid + ? WHERE id = ? RETURNING next_uid").bind(n, b.def.id).first<{ next_uid: number }>();
-  const last = r!.next_uid - 1;
-  return Array.from({ length: n }, (_, i) => `${b.def.uid_prefix}${last - n + 1 + i}`);
+  // never hand out a UID that already exists (imported rows keep their own UIDs)
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = await env.DB.prepare("UPDATE fms_definitions SET next_uid = next_uid + ? WHERE id = ? RETURNING next_uid").bind(n, b.def.id).first<{ next_uid: number }>();
+    const last = r!.next_uid - 1;
+    const uids = Array.from({ length: n }, (_, i) => `${b.def.uid_prefix}${last - n + 1 + i}`);
+    let clash = false;
+    for (let i = 0; i < uids.length && !clash; i += 90) {
+      const chunk = uids.slice(i, i + 90);
+      clash = !!(await env.DB.prepare(`SELECT 1 FROM fms_records WHERE fms_id = ? AND uid IN (${chunk.map(() => "?").join(",")}) LIMIT 1`).bind(b.def.id, ...chunk).first());
+    }
+    if (!clash) return uids;
+    await bumpUid(env, b);
+  }
+  return fail(409, "Could not allocate a free UID — try again");
+}
+
+/** Move next_uid past the highest numeric UID with this FMS's prefix (e.g. after importing UID-4719). */
+export async function bumpUid(env: Env, b: Bundle) {
+  const p = b.def.uid_prefix.length + 1;
+  await env.DB.prepare(`UPDATE fms_definitions SET next_uid = MAX(next_uid, COALESCE((SELECT MAX(CAST(substr(uid, ?) AS INTEGER)) FROM fms_records
+      WHERE fms_id = ? AND substr(uid, 1, ?) = ? AND substr(uid, ?) <> '' AND substr(uid, ?) NOT GLOB '*[^0-9]*'), 0) + 1) WHERE id = ?`)
+    .bind(p, b.def.id, p - 1, b.def.uid_prefix, p, p, b.def.id).run();
 }
 
 const rowFields = (b: Bundle) => b.fields.filter((f) => f.step_id == null);
@@ -77,6 +96,9 @@ export async function createRecordsBulk(env: Env, b: Bundle, rows: RowInput[], a
       const start = startOf(b, v.values, now);
       const allVals: Record<string, unknown> = { ...v.values };
       let lastActual = "", active = 0;
+      const isFinished = (pos: number) => { const imp = v.row.steps?.[pos] || {}; return !!iso(imp.actual) || /^(done|close|closed|completed|yes|ok)$/i.test(String(imp.status || "").trim()); };
+      // steps before the last finished one that were never done were passed over in the sheet (e.g. "Close" → PC verification)
+      const lastFinished = Math.max(0, ...b.steps.filter((s) => isFinished(s.position)).map((s) => s.position));
       const steps = b.steps.map((s) => {
         const imp = v.row.steps?.[s.position] || {};
         const sv = imp.values || {};
@@ -88,6 +110,7 @@ export async function createRecordsBulk(env: Env, b: Bundle, rows: RowInput[], a
           if (actual) lastActual = actual;
           return { s, status: "done", planned: iso(imp.planned), actual, outcome: outcome || "Done", values: sv };
         }
+        if (s.position < lastFinished) return { s, status: "skipped", planned: iso(imp.planned), actual: "", outcome: "", values: sv };
         if (active) return { s, status: "waiting", planned: "", actual: "", outcome: "", values: sv };
         if (!evalCondition(j<Condition | null>(s.condition, null), allVals)) return { s, status: "skipped", planned: "", actual: "", outcome: "", values: sv };
         active = s.position;
@@ -120,5 +143,6 @@ export async function createRecordsBulk(env: Env, b: Bundle, rows: RowInput[], a
     }
     for (let s = 0; s < stmts.length; s += 100) await env.DB.batch(stmts.slice(s, s + 100));
   }
+  if (created.length) await bumpUid(env, b);
   return { created, failed };
 }

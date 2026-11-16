@@ -39,6 +39,7 @@
 | `allDashboard` | own scorecard only | any / all employees |
 | `additionalfeature` | own links | own links |
 | `em-sheet`, `whatsapp` | — | yes |
+| `fms` | FMS they can see (access list or any step's seat/assignment), add rows if allowed, act only on steps assigned to them, approve where they are approver, own notifications/filters | everything: definitions, import, seating, holidays, bulk, reports, audit, reassign/reopen/skip/planned |
 
 ## Data model (D1)
 
@@ -58,6 +59,13 @@
 | `additional_features` | `AdditionalFeature!A:D` | id | |
 | `em_sheet_rows` | EM spreadsheet grid | `row_index` | raw grid, parsed exactly like before; admins can replace via `PUT /api/em-sheet/em-sheet` |
 | `counters`, `job_runs`, `audit_log` | new | | atomic IDs, cron idempotency, who-did-what |
+| `fms_definitions` | new (FMS sheets) | `fms_id` (FMS-0001), `code` | access, calendar, recurrence, settings JSON; soft delete / archive / template; `version` |
+| `fms_fields` | FMS columns | (`fms_id`,`key`) | `step_id` NULL = row column, else a step input; 13 field types |
+| `fms_steps` | STEP-1..n + WHAT/WHO/HOW/WHEN rows | id | `seat_id` / `assign` (WHO), `tat` JSON (hours/days/T-n), `condition`, approval, `jumps` (status → later step, migration 0006) |
+| `fms_seats`, `fms_seat_members` | WHO codes (CRM, PC-1) | `code` | members = department / designation / employee with optional date range |
+| `fms_records`, `fms_record_steps` | one sheet row; Planned/Actual/Status/Delay per step | (`fms_id`,`uid`), (`record_id`,`step_id`) | row data JSON; step status waiting/pending/in_progress/submitted/rejected/done/skipped |
+| `fms_step_history`, `fms_comments`, `fms_attachments`, `fms_notifications` | new | id | per-row audit, comments (internal notes), files (Cloudinary/R2), in-app notifications |
+| `fms_holidays`, `fms_versions`, `fms_saved_filters` | `Holidays` sheet / new | date / id | planning calendar, setup snapshots, per-user filters |
 
 Design choices worth knowing:
 - **Legacy IDs are kept** (EmployeeID, TaskID, ticket numbers) so people's habits and exports still work.
@@ -123,3 +131,17 @@ EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 e
 - Uploads: type allow-list (JPG/PNG/GIF/WEBP/PDF), 5 MB cap, random object keys, private bucket, signed URLs.
 - CORS allow-list (`CORS_ORIGINS`), secure headers on API and SPAs, `audit_log` for writes.
 - All SQL is parameterised (`prepare().bind()`); no string-built queries with user input.
+
+## FMS (Flow Management System)
+Code: `api/src/lib/fms/*` (calendar, engine, definitions, records, importer, actions, cron) and
+`api/src/routes/fms*.ts`; UI: `frontend/shared/fms` (copied into both apps by `node frontend/sync-shared.mjs`),
+`frontend/admin/src/fms`, `frontend/doer/src/fms`.
+- **Planning** reproduces the sheet formulas in IST: working days = `WORKDAY.INTL` (weekly off + `fms_holidays`),
+  fractional WHEN (0.25) = working hours inside the work window, `T-n` = n days before a date column.
+- **Flow**: creating a row activates STEP-1; completing a step (or approving it) plans and activates the next one,
+  skipping steps whose condition is false or that a status jump passes over; the row completes after the last step.
+- **Import**: `POST /api/fms/import/analyze` reads EPIL's FMS layout (STEP labels, WHAT/WHO/HOW/WHEN rows,
+  Planned/Actual/Status per step, step inputs, UID column, "Close"-style jumps); `import/commit` creates the FMS
+  and missing seats; rows go in chunks to `records/import` (validation, duplicate check, dry run).
+- **Cron**: every 5 minutes reminders (before due) and overdue alerts/escalations; hourly recurring rows.
+- FMS tables are **not** part of the Google Sheets backup yet (export to Excel from the grid instead).
