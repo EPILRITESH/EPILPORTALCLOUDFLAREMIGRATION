@@ -126,11 +126,12 @@ supportTicketRoutes.patch("/status/:ticketID", async (c) => {
     else fail(400, "You can only change Done → Approved or Done → Pending");
   }
 
-  const r = await c.env.DB.prepare(
-    "UPDATE support_tickets SET status=?, done_date=?, work_by=?, approval=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE group_key=?",
-  ).bind(newStatus, doneDate, workBy, approval, t.group_key).run();
+  // RETURNING gives the true row count (meta.changes also counts sync-queue trigger inserts)
+  const { results: updated } = await c.env.DB.prepare(
+    "UPDATE support_tickets SET status=?, done_date=?, work_by=?, approval=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE group_key=? RETURNING ticket_id",
+  ).bind(newStatus, doneDate, workBy, approval, t.group_key).all();
   await audit(c.env, me.employeeID, "status", "support_ticket", t.ticket_id, { Status, newStatus });
-  return c.json({ ok: true, message: `Updated ${r.meta.changes} ticket(s)`, newStatus, workBy, doneDate, taskApproval: approval });
+  return c.json({ ok: true, message: `Updated ${updated.length} ticket(s)`, newStatus, workBy, doneDate, taskApproval: approval });
 });
 
 /** PATCH /api/support-tickets/done-details/:ticketID { Problem, Solution } */
@@ -140,10 +141,10 @@ supportTicketRoutes.patch("/done-details/:ticketID", async (c) => {
   const t = await loadTicket(c);
   const me = c.get("user");
   if (!isAdmin(c) && t.assigned_to !== me.name && t.work_by !== me.name) fail(404, "Ticket not found");
-  const r = await c.env.DB.prepare(
-    "UPDATE support_tickets SET problem=?, solution=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE group_key=?",
-  ).bind(String(Problem), String(Solution), t.group_key).run();
-  return c.json({ ok: true, message: `Updated ${r.meta.changes} ticket(s) with problem/solution`, problem: Problem, solution: Solution });
+  const { results: updated } = await c.env.DB.prepare(
+    "UPDATE support_tickets SET problem=?, solution=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE group_key=? RETURNING ticket_id",
+  ).bind(String(Problem), String(Solution), t.group_key).all();
+  return c.json({ ok: true, message: `Updated ${updated.length} ticket(s) with problem/solution`, problem: Problem, solution: Solution });
 });
 
 /** GET /api/support-tickets/filter */

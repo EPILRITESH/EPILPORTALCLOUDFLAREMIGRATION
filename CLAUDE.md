@@ -39,9 +39,14 @@ cd frontend/doer && npm ci --legacy-peer-deps && npm start   # REACT_APP_BASE_UR
    or `r2` (private bucket, signed expiring URLs; used by the test suite). Never hard-code one backend.
 6. **Secrets** only via `wrangler secret put` / GitHub secrets. Nothing secret in `REACT_APP_*`
    (it is bundled into public JS — CI fails the build if a token pattern appears).
-7. People are referenced **by name** across modules (legacy design). When adding features prefer
+7. **Google Sheets backup.** Every synced table has D1 triggers (migration 0003) that queue changed
+   keys; `api/src/lib/sheetsSync.ts` maps rows to the legacy sheet layouts. A new synced table needs
+   triggers in a new migration AND a `SheetSpec`. Never write formula columns (Master!H,
+   SupportTicketsMaster L/P/Q, HelpTicketsMaster I/J). Use `RETURNING` to count updated rows —
+   `meta.changes` also counts trigger inserts.
+8. People are referenced **by name** across modules (legacy design). When adding features prefer
    `employee_id`, but keep name columns populated for compatibility.
-8. Business rules that were deliberately preserved (do not "fix" without a product decision):
+9. Business rules that were deliberately preserved (do not "fix" without a product decision):
    dashboard scoring maths, the 3-day ticket SLA, support tickets fan-out to every MIS member,
    training = COMMON + designation templates with 2 self + 2 with-doer views per item.
 

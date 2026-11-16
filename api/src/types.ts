@@ -14,12 +14,28 @@ export interface Env {
   FILE_STORAGE?: string;
   CLOUDINARY_CLOUD_NAME?: string;
   CLOUDINARY_FOLDER?: string;
+  /** "true" turns on the D1 → Google Sheets backup sync. */
+  SHEETS_SYNC_ENABLED?: string;
+  /** Optional tab-name prefix (e.g. "ZZTEST_") to target test/staging tabs instead of the real ones. */
+  SHEETS_TAB_PREFIX?: string;
+  EM_SHEET_TAB_NAME?: string;
 
   // secrets
   JWT_SECRET: string;
   FILE_URL_SECRET: string;
   META_WA_TOKEN?: string;
   CLOUDINARY_API_KEY?: string;
+  // Google Sheets backup (service account + legacy spreadsheet IDs) — Worker secrets
+  GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
+  GOOGLE_PRIVATE_KEY?: string;
+  GOOGLE_SHEET_ID?: string;
+  GOOGLE_SHEET_ID_CHECKLIST?: string;
+  GOOGLE_SHEET_ID_DELEGATION?: string;
+  GOOGLE_SHEET_ID_HELPTICKET?: string;
+  GOOGLE_SHEET_ID_SUPPORTTICKET?: string;
+  GOOGLE_SHEET_ID_WORKLIST?: string;
+  GOOGLE_SHEET_ID_TRAINING?: string;
+  GOOGLE_SHEET_ID_EMSHEET?: string;
   CLOUDINARY_API_SECRET?: string;
   META_WA_PHONE_ID?: string;
   ADMIN_REGISTRATION_KEY?: string;

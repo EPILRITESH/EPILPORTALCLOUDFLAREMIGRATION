@@ -67,6 +67,41 @@ Design choices worth knowing:
 - **Dates as legacy strings**: the UI parses `DD/MM/YYYY`; storing those strings guarantees identical
   reports. ISO `created_at`/`updated_at` columns are kept for auditing.
 
+## Google Sheets backup (D1 → Sheets)
+The legacy Google Sheets stay a live, human-readable backup of all data.
+
+```
+portal write → D1 row → trigger → sheet_sync_queue ──(cron, every minute)──▶ legacy Google Sheets (same tabs & columns)
+EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 em_sheet_rows → /api/em-sheet
+```
+- **Capture**: triggers on every synced table (migration 0003) record the changed row's key, so API
+  writes, cron jobs and manual SQL are all captured.
+- **Apply** (`api/src/lib/sheetsSync.ts`): per tab, read the ID column, then update the row in place,
+  append new rows (growing the grid if needed) or clear rows deleted in the portal — the same way the
+  legacy backend wrote these sheets. Batched (`values:batchUpdate`), lease-locked, retried on failure;
+  a failing tab keeps only its own changes queued.
+- **Formula columns are never written**: `Master!H` (Actual) is fed by writing completions into
+  `Consolidated`, exactly as before; `SupportTicketsMaster` L/P/Q and `HelpTicketsMaster` I/J are skipped.
+- **Formula injection**: text starting with `=`, `@`, or a non-numeric `+`/`-` is written as plain text.
+- **Admin controls**: `GET /api/sheets-sync/status`, `POST /api/sheets-sync/run`,
+  `POST /api/sheets-sync/clear-queue`, `POST /api/sheets-sync/pull-em-sheet`.
+- **Switch**: `SHEETS_SYNC_ENABLED` (off until the old portal stops writing to the sheets);
+  `SHEETS_TAB_PREFIX` targets test/staging tabs (e.g. `ZZTEST_`).
+
+| Sheet tab | Source table | Key column | Written columns |
+|---|---|---|---|
+| Employee / Admin | `users` (+ `user_documents`) | A (ID) | A–BW / A–G |
+| AdditionalFeature | `additional_features` | A+B+C | A–D |
+| DelegationMaster | `delegations` | A | A–N |
+| Master / Consolidated | `checklist_tasks` | D / A | A–G, I–K / A–B (done date) |
+| MasterTasks | `checklist_templates` | A | A–I |
+| HelpTicketsMaster | `help_tickets` | A | A–H |
+| SupportTicketsMaster | `support_tickets` | A | A–K, M–O |
+| WorkList | `worklists` | A | A–J |
+| MasterTemplateData | `training_templates` + `training_indices` | A (one row per index) | A–H |
+| AQData | `training_questions` | B | A–H |
+| EmployeeTrainingData | `training_records` | A+D | A–P |
+
 ## Security controls
 - JWT 2-day expiry; role in token; admin routes return 403 for employees.
 - Passwords: PBKDF2-SHA256 100k iterations; legacy bcrypt verified then rehashed.

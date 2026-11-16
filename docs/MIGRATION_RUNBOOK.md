@@ -88,6 +88,21 @@ GitHub settings for automated deploys:
 4. Point the old portal URLs at the new Workers, or share the new URLs.
 5. Keep the Google Sheets **read-only** for 30 days as a fallback, then archive them.
 
+## Turning on the Google Sheets backup
+The sync writes into the **same** spreadsheets the old portal uses, so it must only be switched on
+once the old portal has stopped writing to them (otherwise both systems edit the same rows).
+1. Stop the old Render backend (write freeze).
+2. Re-run steps 3 and 5 so D1 holds the latest sheet data, then **clear the sync queue** — the
+   re-import itself queues every row: `POST /api/sheets-sync/clear-queue` (admin).
+3. Set `"SHEETS_SYNC_ENABLED": "true"` in `api/wrangler.jsonc` and deploy (or push to `main`).
+4. Make one change in the portal and check `GET /api/sheets-sync/status` (admin) — pending drops to 0
+   within a minute and every sheet shows `ok: true`. Changes made in the portal before step 3 are
+   still queued and are written on the first run.
+
+Google secrets on the Worker: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` and the eight
+`GOOGLE_SHEET_ID*` values (same names as the legacy `.env`). The service account needs **Editor**
+on each spreadsheet (it already has it — the legacy backend used it).
+
 ## Rollback
 Until the Sheets are archived, rollback means restarting the old Render service and pointing DNS
 back. Any data entered in the new system during the trial would then need to be re-entered there.

@@ -16,6 +16,8 @@ import { featureRoutes, emSheetRoutes, whatsappRoutes } from "./routes/misc";
 import { serveFile } from "./lib/files";
 import { requireAdmin, requireAuth } from "./middleware/auth";
 import { runMonthlyGeneration } from "./lib/checklistGen";
+import { sheetsSyncRoutes } from "./routes/sheetsSync";
+import { pullEmSheet, runSheetsSync, syncEnabled } from "./lib/sheetsSync";
 
 /**
  * Express matched routes case-insensitively and ignored trailing slashes, and
@@ -67,6 +69,7 @@ app.route("/api/whatsapp", whatsappRoutes);
 app.route("/api/worklist", worklistRoutes);
 app.route("/api/training", trainingRoutes);
 app.route("/api/em-sheet", emSheetRoutes);
+app.route("/api/sheets-sync", sheetsSyncRoutes);
 
 app.notFound((c) => c.json({ success: false, error: `Cannot ${c.req.method} ${c.req.path}` }, 404));
 
@@ -78,8 +81,14 @@ app.onError((err, c) => {
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runMonthlyGeneration(env).then((r) => console.log("checklist generation", JSON.stringify({ ...r, createdTasks: undefined, count: "createdTasks" in r ? r.createdTasks.length : 0 }))));
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron === "0 * * * *") {
+      ctx.waitUntil(runMonthlyGeneration(env).then((r) => console.log("checklist generation", JSON.stringify({ ...r, createdTasks: undefined, count: "createdTasks" in r ? r.createdTasks.length : 0 }))));
+      return;
+    }
+    // every minute: Google Sheets backup; every 10 minutes: refresh the EM report from Sheets
+    if (syncEnabled(env)) ctx.waitUntil(runSheetsSync(env).then((r) => { if (!("skipped" in r) && r.processed) console.log("sheets sync", JSON.stringify(r)); }));
+    if (new Date(event.scheduledTime).getUTCMinutes() % 10 === 0) ctx.waitUntil(pullEmSheet(env).catch((e) => console.error("em pull", e.message)));
   },
 } satisfies ExportedHandler<Env>;
 

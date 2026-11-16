@@ -31,6 +31,7 @@ exists, with the same paths, request bodies and response keys. The changes below
 | B12 | Doer registration showed the new Employee ID for 3 seconds at the top of a long form, then redirected — people never saw their login ID. | ID shown in a popup with Copy, until the user clicks "Go to Login". `node start-local.mjs --list-users` lists every login ID locally. |
 | B13 | Clicking **Next** on the "Bank & Docs" tab submitted the registration immediately (React reused the button as Submit mid-click), skipping "Personal Details". | Buttons keyed separately; the form only submits from the final tab. |
 | B14 | (new admin sign-up rule) Admins had no way to reach Register once logged in, and a refusal did not say why. | "Add Admin" in the admin sidebar; the page shows who is logged in; the API names the exact reason (not logged in / employee login / expired login / wrong key). |
+| B15 | Google Sheets were the database; any edit by hand or by the app was the only copy. | D1 is the database; the same Sheets are kept up to date automatically within ~1 minute as a backup (see ARCHITECTURE.md). The EM report is still computed in Sheets and read back every 10 minutes. |
 
 ## Unchanged on purpose (business rules)
 The dashboard scoring formula (`pending% × 0.8 + avg delay% × 0.2`), Monday-based week numbering,

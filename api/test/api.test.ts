@@ -247,7 +247,8 @@ describe("tickets", () => {
     form.set("Issue", "VPN down");
     form.set("IssuePhoto", new File([new Uint8Array([255, 216, 255])], "s.jpg", { type: "image/jpeg" }));
     const c = await call("POST", "/api/support-tickets/create", { token: emp, form });
-    expect(c.json.ticketIDs).toHaveLength(2);
+    const misCount = (await env.DB.prepare("SELECT COUNT(*) n FROM users WHERE role='employee' AND department='MIS' AND is_active=1").first<{ n: number }>())!.n;
+    expect(c.json.ticketIDs).toHaveLength(misCount); // one copy per MIS member (other test files may add MIS users)
 
     const [t1] = c.json.ticketIDs;
     expect((await call("PATCH", `/api/support-tickets/status/${encodeURIComponent(t1)}`, { token: emp, body: { Status: "Approved" } })).status).toBe(400);
@@ -260,7 +261,7 @@ describe("tickets", () => {
     expect((await call("PATCH", `/api/support-tickets/status/${encodeURIComponent(t1)}`, { token: ravi, body: { Status: "Done" } })).status).toBe(200);
     await call("PATCH", `/api/support-tickets/done-details/${encodeURIComponent(t1)}`, { token: ravi, body: { Problem: "ISP", Solution: "Restarted" } });
     const ap = await call("PATCH", `/api/support-tickets/status/${encodeURIComponent(t1)}`, { token: emp, body: { Status: "Approved" } });
-    expect(ap.json).toMatchObject({ newStatus: "Done", taskApproval: "Approved", message: "Updated 2 ticket(s)" });
+    expect(ap.json).toMatchObject({ newStatus: "Done", taskApproval: "Approved", message: `Updated ${misCount} ticket(s)` });
   });
 });
 

@@ -8,7 +8,9 @@
   "placement": { "mode": "smart" },
 
   // Checklist auto-generation (replaces node-cron "0 * * * *" + last-generate.txt).
-  "triggers": { "crons": ["0 * * * *"] },
+  // "0 * * * *": checklist auto-generation (hourly check, once per month).
+  // "* * * * *": Google Sheets backup sync (every minute; EM report pulled every 10 minutes).
+  "triggers": { "crons": ["0 * * * *", "* * * * *"] },
 
   "d1_databases": [
     {
@@ -29,6 +31,9 @@
     "PUBLIC_API_URL": "https://epil-api.epil.workers.dev",
     "MAX_UPLOAD_BYTES": "5242880",
     "FILE_STORAGE": "cloudinary",
+    // D1 → Google Sheets backup. Turn on only after the old portal has stopped writing to the sheets.
+    "SHEETS_SYNC_ENABLED": "false",
+    "EM_SHEET_TAB_NAME": "EM SHEET WITH RITEH SIR",
     "CLOUDINARY_FOLDER": "employee_documents",
     "WHATSAPP_TEMPLATE_PENDING": "pendingtask",
     "WHATSAPP_TEMPLATE_WORKREPORT": "workreport",
