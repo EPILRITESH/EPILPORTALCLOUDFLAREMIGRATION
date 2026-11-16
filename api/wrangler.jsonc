@@ -19,15 +19,17 @@
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [
-    { "binding": "FILES", "bucket_name": "epil-files" }
-  ],
+  // File storage: Cloudinary (public URLs, same as the legacy system). To switch to a private
+  // R2 bucket instead, add  "r2_buckets": [{ "binding": "FILES", "bucket_name": "epil-files" }]
+  // and set FILE_STORAGE to "r2".
 
   "vars": {
     // Comma-separated list of allowed browser origins for CORS.
     "CORS_ORIGINS": "https://epil-portal.epil.workers.dev,https://epil-admin.epil.workers.dev,http://localhost:3000,http://localhost:3001",
     "PUBLIC_API_URL": "https://epil-api.epil.workers.dev",
     "MAX_UPLOAD_BYTES": "5242880",
+    "FILE_STORAGE": "cloudinary",
+    "CLOUDINARY_FOLDER": "employee_documents",
     "WHATSAPP_TEMPLATE_PENDING": "pendingtask",
     "WHATSAPP_TEMPLATE_WORKREPORT": "workreport",
     "WHATSAPP_API_VERSION": "v21.0"
@@ -35,7 +37,8 @@
 
   // Secrets (set with `wrangler secret put <NAME>`, never commit):
   //   JWT_SECRET            – HS256 signing key for session tokens
-  //   FILE_URL_SECRET       – HMAC key for signed R2 download URLs
+  //   FILE_URL_SECRET       – HMAC key for signed R2 download URLs (only used with FILE_STORAGE=r2)
+  //   CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET – uploads (FILE_STORAGE=cloudinary)
   //   META_WA_TOKEN         – WhatsApp Cloud API token
   //   META_WA_PHONE_ID      – WhatsApp phone number ID
   //   ADMIN_REGISTRATION_KEY – optional; required to self-register new admins

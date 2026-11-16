@@ -34,8 +34,9 @@ cd frontend/doer && npm ci --legacy-peer-deps && npm start   # REACT_APP_BASE_UR
    applied migration. Keep columns `NOT NULL DEFAULT ''` (the legacy data is string-based).
 4. **Dates** stay in the legacy display formats the UI parses: `DD/MM/YYYY HH:mm:ss` (IST via
    `formatDateIST`) for timestamps, `DD/MM/YYYY` for dates. Use helpers in `api/src/lib/dates.ts`.
-5. **Files** go through `storeUpload()` → stored as `r2:<key>`; return them via `publicFileUrl()`
-   (signed, expiring). Never make the bucket public — it holds Aadhaar/PAN/bank documents.
+5. **Files** go through `storeUpload()` and are returned via `publicFileUrl()`. Storage is chosen by
+   `FILE_STORAGE`: `cloudinary` (production, owner's decision — public URLs as in the legacy system)
+   or `r2` (private bucket, signed expiring URLs; used by the test suite). Never hard-code one backend.
 6. **Secrets** only via `wrangler secret put` / GitHub secrets. Nothing secret in `REACT_APP_*`
    (it is bundled into public JS — CI fails the build if a token pattern appears).
 7. People are referenced **by name** across modules (legacy design). When adding features prefer

@@ -1,11 +1,13 @@
 # EPIL Work Management Portal — Cloudflare edition
 
+**Live:** [Doer portal](https://epil-portal.epil.workers.dev) · [Admin portal](https://epil-admin.epil.workers.dev) · [API health](https://epil-api.epil.workers.dev/health)
+
 The EPIL portal (delegations, checklists, help and support tickets, worklists, training,
 performance dashboards) rebuilt to run entirely on Cloudflare:
 
 - **API**: Cloudflare Workers + Hono → [`api/`](api)
 - **Database**: Cloudflare D1, replacing 9 Google spreadsheets → [`api/migrations/`](api/migrations)
-- **Files**: Cloudflare R2 (private, signed URLs), replacing Cloudinary
+- **Files**: Cloudinary (public URLs, as before); optional private Cloudflare R2 via `FILE_STORAGE=r2`
 - **Portals**: Doer and Admin React apps on Workers static assets → [`frontend/`](frontend)
 - **Scheduler**: Cron Trigger for monthly checklist generation
 - **Migration**: Sheets → D1 and Cloudinary → R2 tooling with verification → [`migration/`](migration)

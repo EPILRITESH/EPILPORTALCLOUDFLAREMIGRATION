@@ -9,7 +9,9 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
+          r2Buckets: ["FILES"],
           bindings: {
+            FILE_STORAGE: "r2",
             JWT_SECRET: "test-jwt-secret",
             FILE_URL_SECRET: "test-file-secret",
             TEST_MIGRATIONS: migrations,

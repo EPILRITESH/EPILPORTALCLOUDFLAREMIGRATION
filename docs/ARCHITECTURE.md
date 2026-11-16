@@ -7,7 +7,7 @@
 | Frontends | 2 × CRA apps on a static host | Same apps, served by **Workers static assets** (`epil-portal`, `epil-admin`) |
 | Backend | Express 5 on Render (one Node process) | **Hono on Cloudflare Workers** (`epil-api`), global, no servers |
 | Database | 9 Google spreadsheets / 14 tabs via service account | **Cloudflare D1** (`epil-db`), 17 tables, indexed, transactional batches |
-| Files | Cloudinary, public URLs | **R2** private bucket `epil-files`, HMAC-signed 7-day URLs |
+| Files | Cloudinary, public URLs | **Cloudinary**, public URLs (owner's decision; uploads signed server-side). Switchable to a private **R2** bucket with signed URLs via `FILE_STORAGE=r2` |
 | Scheduler | `node-cron` hourly + `last-generate.txt` on local disk | **Cron Trigger** hourly + `job_runs` table (idempotent) |
 | Auth | JWT (no role claim), bcrypt | JWT HS256 **with role**, PBKDF2 (legacy bcrypt verified & upgraded on login) |
 | Authorization | Any logged-in user could call any route | **RBAC**: admin-only, self-only and owner-or-admin enforced server-side |
@@ -19,7 +19,7 @@
  Browser (Admin) ── HTTPS ──▶  epil-admin   (static assets, SPA fallback)
         │
         └── XHR /api/* ─────▶  epil-api  (Hono Worker) ──▶ D1  epil-db
-                                    │   ├────────────────▶ R2  epil-files (private)
+                                    │   ├────────────────▶ Cloudinary (uploads; public URLs)
                                     │   └── fetch ───────▶ WhatsApp Cloud API
                                Cron 0 * * * * → checklist next-month generation
 ```

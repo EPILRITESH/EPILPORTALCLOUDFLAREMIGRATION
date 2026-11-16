@@ -16,12 +16,13 @@ old portal between the final export and the DNS switch.
 cd api && npm ci
 npx wrangler login
 npx wrangler d1 create epil-db            # copy database_id into api/wrangler.jsonc
-npx wrangler r2 bucket create epil-files
+npx wrangler r2 bucket create epil-files   # only if FILE_STORAGE=r2
 npx wrangler secret put JWT_SECRET            # e.g. `openssl rand -base64 48`
 npx wrangler secret put FILE_URL_SECRET       # a different random value
 npx wrangler secret put ADMIN_REGISTRATION_KEY
 npx wrangler secret put META_WA_TOKEN         # the NEW, rotated WhatsApp token
 npx wrangler secret put META_WA_PHONE_ID
+npx wrangler secret put CLOUDINARY_CLOUD_NAME   # + CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
 npm run db:migrate:remote                     # creates all tables
 ```
 Set `CORS_ORIGINS` (in `wrangler.jsonc`, or as the GitHub variable used by `deploy.yml`) to the two
@@ -44,7 +45,8 @@ This writes `out/sheets/*.json`, one file per tab with the exact strings the old
 can't use the service account, download each tab as CSV into `out/csv/<key>.csv`. The keys are
 listed in `sources.mjs`.
 
-## 4. Copy files from Cloudinary to R2
+## 4. Copy files from Cloudinary to R2 (only if FILE_STORAGE=r2)
+Skip this step with the default `FILE_STORAGE=cloudinary`: migrated file links stay on Cloudinary and keep working.
 Create an R2 API token (R2 → Manage API tokens → Object Read & Write on `epil-files`), then:
 ```bash
 R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... node migrate-files.mjs
@@ -76,7 +78,7 @@ cd ../admin          && npm ci --legacy-peer-deps && REACT_APP_BASE_URL=https://
 Attach custom domains in the dashboard (Workers → each Worker → Settings → Domains & Routes).
 
 GitHub settings for automated deploys:
-- Secrets: `CLOUDFLARE_API_TOKEN` (Workers, D1, R2 edit), `CLOUDFLARE_ACCOUNT_ID`, `ANTHROPIC_API_KEY` (optional, for `@claude`).
+- Secrets: `CLOUDFLARE_API_TOKEN` (Workers Scripts Edit, D1 Edit; R2 Edit only if using R2), `CLOUDFLARE_ACCOUNT_ID`, `ANTHROPIC_API_KEY` (optional, for `@claude`).
 - Variables (environment `production`): `API_URL` (e.g. `https://api.epil.biz`) and `CORS_ORIGINS`.
 
 ## 7. Cut over
@@ -91,6 +93,12 @@ Until the Sheets are archived, rollback means restarting the old Render service 
 back. Any data entered in the new system during the trial would then need to be re-entered there.
 D1 also has **Time Travel** (point-in-time restore for 30 days):
 `wrangler d1 time-travel restore epil-db --timestamp=<ISO time>`.
+
+## Portals: fallback deploy
+If the Workers static-assets upload is not reachable (e.g. behind a proxy that rewrites the upload
+token), deploy a portal as a single self-contained Worker instead:
+`cd frontend && npm --prefix doer run build && node deploy-embedded.mjs doer` (same for `admin`).
+A later normal `npm run deploy` or GitHub Actions run replaces it.
 
 ## Ongoing operations
 - **Backups**: D1 Time Travel is automatic. For off-platform copies, schedule `wrangler d1 export epil-db --remote --output backup.sql`.

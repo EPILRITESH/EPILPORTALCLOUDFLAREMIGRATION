@@ -154,3 +154,6 @@ $RECYCLE.BIN/
 *.7z
 *.tar
 *.tar.gz
+
+# Generated embedded-portal workers (frontend/deploy-embedded.mjs)
+.embedded/

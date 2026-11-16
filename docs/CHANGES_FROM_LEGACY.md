@@ -12,7 +12,7 @@ exists, with the same paths, request bodies and response keys. The changes below
 | S4 | `POST /api/adminauth/admin/register` was public, so anyone could create an admin account. | Allowed only when no admin exists yet, or with `ADMIN_REGISTRATION_KEY`, or with an admin's token. The admin Register page gained a "Registration Key" field. |
 | S5 | `POST /api/checklist/auto-generate-next-month` trusted the header `x-cron-job: true`. | Admin-only. The scheduler calls the code directly. |
 | S6 | `GET /api/training/qa/:id` without `forTest=1` returned the correct answers to anyone. | Correct answers are returned to admins only. |
-| S7 | Aadhaar, PAN, bank passbook and certificate images were public Cloudinary URLs. | Private R2 bucket. The API hands out signed links that expire after 7 days. |
+| S7 | Aadhaar, PAN, bank passbook and certificate images were public Cloudinary URLs. | **Unchanged by owner decision** — files stay on Cloudinary with public URLs (no R2). The API secret is server-side only and uploads are signed. A private R2 bucket with expiring links can be enabled later with `FILE_STORAGE=r2`. |
 
 ## Bug fixes
 | # | Legacy behaviour | Now |
