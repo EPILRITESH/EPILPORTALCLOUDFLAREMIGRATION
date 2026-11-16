@@ -96,12 +96,16 @@ export default {
       ctx.waitUntil(runMonthlyGeneration(env).then((r) => console.log("checklist generation", JSON.stringify({ ...r, createdTasks: undefined, count: "createdTasks" in r ? r.createdTasks.length : 0 }))));
       return;
     }
-    // every minute: Google Sheets backup; every 10 minutes: refresh the EM report from Sheets
-    if (syncEnabled(env)) ctx.waitUntil(runSheetsSync(env).then((r) => { if (!("skipped" in r) && r.processed) console.log("sheets sync", JSON.stringify(r)); }));
+    // Every minute: push portal changes to Google Sheets. Every 5 minutes (transition): first pull
+    // old-portal changes from the sheets, THEN push — sequential, so the push never races the pull.
     const minute = new Date(event.scheduledTime).getUTCMinutes();
+    const pull = minute % 5 === 2 && pullEnabled(env)
+      ? runSheetsPull(env).then((r) => console.log("sheets pull", JSON.stringify(r))).catch((e) => console.error("sheets pull", e.message))
+      : Promise.resolve();
+    ctx.waitUntil(pull.then(() => (syncEnabled(env) ? runSheetsSync(env) : null))
+      .then((r) => { if (r && !("skipped" in r) && r.processed) console.log("sheets sync", JSON.stringify(r)); })
+      .catch((e) => console.error("sheets sync", e.message)));
     if (minute % 10 === 0) ctx.waitUntil(pullEmSheet(env).catch((e) => console.error("em pull", e.message)));
-    // transition: copy old-portal changes from the sheets into D1 every 5 minutes
-    if (minute % 5 === 2 && pullEnabled(env)) ctx.waitUntil(runSheetsPull(env).then((r) => console.log("sheets pull", JSON.stringify(r))).catch((e) => console.error("sheets pull", e.message)));
   },
 } satisfies ExportedHandler<Env>;
 
