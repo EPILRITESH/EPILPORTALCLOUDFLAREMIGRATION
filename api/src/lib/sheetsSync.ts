@@ -335,8 +335,14 @@ export async function pullEmSheet(env: Env) {
   const [rows] = await batchGet(env, sid, [`${a1Tab(tab)}!A1:M1000`]);
   if (!rows?.length) return { skipped: "empty sheet" };
   const cells = rows.map((r) => JSON.stringify(Array.from({ length: 13 }, (_, i) => String(r[i] ?? ""))));
+  // only rewrite when the report changed (D1 row writes are metered per day)
+  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(cells.join("\n"))))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const prev = await env.DB.prepare("SELECT value FROM sheet_sync_state WHERE name = 'emhash'").first<{ value: string }>();
+  const have = await env.DB.prepare("SELECT COUNT(*) AS n FROM em_sheet_rows").first<{ n: number }>();
+  if (prev?.value === digest && have?.n === cells.length) return { rows: cells.length, unchanged: true };
   const stmts = [env.DB.prepare("DELETE FROM em_sheet_rows"), ...cells.map((c, i) => env.DB.prepare("INSERT INTO em_sheet_rows (row_index, cells) VALUES (?, ?)").bind(i, c))];
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  await setState(env, "emhash", digest);
   await setState(env, "status:EM pull", { ok: true, at: new Date().toISOString(), rows: cells.length });
   return { rows: cells.length };
 }
