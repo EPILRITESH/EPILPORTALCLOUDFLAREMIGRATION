@@ -91,6 +91,9 @@ export function normaliseDefinition(input: DefinitionInput) {
     if ((s.tat.type === "before_field" || s.tat.type === "after_field") && s.tat.field && !allKeys.has(s.tat.field)) errors.push(`${s.code}: TAT column "${s.tat.field}" does not exist`);
     if (s.condition && !allKeys.has(s.condition.field)) errors.push(`${s.code}: condition column "${s.condition.field}" does not exist`);
   }
+  // who sees the FMS: at least one department or designation is mandatory
+  const access = spec(input.access);
+  if (!access.departments.length && !access.designations.length) errors.push("Select at least one department or designation that will see this FMS");
   const startField = str(input.start_field);
   if (startField && !fields.some((f) => f.key === startField)) errors.push(`Start column "${startField}" does not exist`);
   if (errors.length) fail(400, errors[0], { errors });
@@ -98,7 +101,7 @@ export function normaliseDefinition(input: DefinitionInput) {
     def: {
       name, code: str(input.code).trim(), category: str(input.category).trim(), description: str(input.description), instructions: str(input.instructions),
       priority, status: input.status === "inactive" ? "inactive" : "active", is_template: input.is_template ? 1 : 0,
-      access: JSON.stringify(spec(input.access)), calendar: JSON.stringify(input.calendar || {}), frequency, schedule: JSON.stringify(input.schedule || {}),
+      access: JSON.stringify(access), calendar: JSON.stringify(input.calendar || {}), frequency, schedule: JSON.stringify(input.schedule || {}),
       start_date: str(input.start_date), due_date: str(input.due_date), start_field: startField, uid_prefix: str(input.uid_prefix).trim() || "UID-",
       settings: JSON.stringify(input.settings || {}),
     },

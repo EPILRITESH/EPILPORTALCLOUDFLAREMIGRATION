@@ -101,11 +101,10 @@ export function canApprove(step: StepRow, seats: Map<number, Seat>, u: Actor): b
 export function fmsVisible(b: Pick<Bundle, "def" | "steps" | "seats">, u: Actor): { view: boolean; create: boolean } {
   if (u.role === "admin") return { view: true, create: true };
   if (b.def.deleted || b.def.archived || b.def.status !== "active") return { view: false, create: false };
-  const access = j<AssignSpec>(b.def.access, {});
-  const byAccess = matchesSpec(access, u);
-  const anyStep = b.steps.some((s) => stepEligible(s, b.seats, u) || canApprove(s, b.seats, u));
-  const firstStep = b.steps[0] ? stepEligible(b.steps[0], b.seats, u) : false;
-  return { view: byAccess || anyStep, create: byAccess || (specEmpty(access) && firstStep) };
+  // Only doers of the FMS's selected departments / designations (or listed employees) see it and add rows.
+  // Someone assigned a step from outside that list still gets the task itself (My tasks), not the FMS.
+  const ok = matchesSpec(j<AssignSpec>(b.def.access, {}), u);
+  return { view: ok, create: ok };
 }
 
 /** Active employees (and optionally admins) matching a step's assignment — for notifications. */

@@ -108,10 +108,12 @@ export default function FmsBuilder() {
   if (!def) return <div><FmsNav /><ErrorBox>{errors[0]}</ErrorBox><Spinner /></div>;
 
   const set = (patch) => setDef({ ...def, ...patch });
+  const noAccess = !def.access?.departments?.length && !def.access?.designations?.length;
   const setStep = (i, patch) => set({ steps: def.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
   const fieldsBefore = (i) => [...def.fields, ...def.steps.slice(0, i + 1).flatMap((s) => s.fields)].filter((f) => f.key);
 
   const save = async () => {
+    if (noAccess) { setTab("basic"); setErrors(["Select at least one department or designation in “Visible to”"]); window.scrollTo(0, 0); return; }
     setBusy(true); setErrors([]);
     try {
       const body = { ...def, steps: def.steps.map((s, i) => ({ ...s, code: s.code || `STEP-${i + 1}` })) };
@@ -135,7 +137,7 @@ export default function FmsBuilder() {
         </div>
       </div>
       {errors.length > 0 && <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"><b>Please fix:</b><ul className="ml-5 list-disc">{errors.map((e) => <li key={e}>{e}</li>)}</ul></div>}
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "basic", label: "Basic" }, { value: "access", label: "Access & schedule" }, { value: "columns", label: "Columns", count: def.fields.length }, { value: "steps", label: "Steps", count: def.steps.length }, { value: "preview", label: "Preview" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: "basic", label: "Basic" }, { value: "access", label: "Schedule & calendar" }, { value: "columns", label: "Columns", count: def.fields.length }, { value: "steps", label: "Steps", count: def.steps.length }, { value: "preview", label: "Preview" }]} />
       <div className="mt-4">
         {tab === "basic" && (
           <div className="grid gap-4 rounded-lg border bg-white p-4 md:grid-cols-2">
@@ -156,17 +158,17 @@ export default function FmsBuilder() {
                 {def.fields.filter((f) => f.key && (f.type === "date" || f.type === "datetime")).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
               </select>
             </div>
+            <div className={`rounded-md border p-3 md:col-span-2 ${noAccess ? "border-red-300 bg-red-50" : "border-blue-200 bg-blue-50/50"}`}>
+              <Label required>Visible to — department / designation</Label>
+              <p className="mb-2 text-xs text-gray-600">Only doers of these departments or designations see this FMS and can add entries (select at least one). Extra individual employees are optional. Admins always see everything.</p>
+              <WhoPicker value={def.access} lk={lk} withSeat={false} onChange={(v) => set({ access: v })} />
+            </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!def.is_template} onChange={(e) => set({ is_template: e.target.checked })} /> This is a template (not used for rows)</label>
           </div>
         )}
 
         {tab === "access" && (
           <div className="space-y-4">
-            <div className="rounded-lg border bg-white p-4">
-              <h3 className="font-semibold">Who can see this FMS and add rows</h3>
-              <p className="mb-2 text-sm text-gray-500">Leave empty: people on STEP-1 can add rows, everyone on any step can see it. Admins always have full access.</p>
-              <WhoPicker value={def.access} lk={lk} withSeat={false} onChange={(v) => set({ access: v })} />
-            </div>
             <div className="rounded-lg border bg-white p-4">
               <h3 className="mb-2 font-semibold">Working calendar (for TAT)</h3>
               <div className="grid gap-3 md:grid-cols-3">

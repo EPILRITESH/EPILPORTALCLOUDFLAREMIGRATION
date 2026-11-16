@@ -1,10 +1,10 @@
 // Auto-create an FMS from an Excel/CSV file: pick a sheet → the server reads the FMS layout
 // (STEP / WHAT / WHO / HOW / WHEN rows, Planned / Actual / Status columns) → review → create + import rows.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import api, { errMsg, readWorkbook, sheetToGrid } from "./shared/api";
-import { Btn, Spinner, ErrorBox, Label, inputCls, cx } from "./shared/ui";
+import { Btn, Spinner, ErrorBox, Label, inputCls, cx, MultiPick } from "./shared/ui";
 import { FmsNav } from "./FmsAdmin";
 
 const TYPES = ["text", "textarea", "number", "date", "datetime", "select", "multiselect", "checkbox", "email", "phone", "url", "employee"];
@@ -21,6 +21,10 @@ export default function FmsImport() {
   const [err, setErr] = useState("");
   const [progress, setProgress] = useState(null);
   const [done, setDone] = useState(null);
+  const [lk, setLk] = useState({ departments: [], designations: [] });
+  useEffect(() => { api.get("/lookups").then((r) => setLk(r.data)).catch(() => {}); }, []);
+  const access = def?.access || { departments: [], designations: [], employees: [] };
+  const noAccess = !access.departments?.length && !access.designations?.length;
 
   const looksFms = (ws) => { const g = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0, defval: "" }).slice(0, 15); return g.some((r) => r.some((c) => /^planned/i.test(String(c).trim()))); };
 
@@ -30,7 +34,7 @@ export default function FmsImport() {
       const grid = sheetToGrid(XLSX, book.Sheets[name]);
       const r = await api.post("/import/analyze", { grid, name });
       setA(r.data);
-      setDef({ ...r.data.definition, name: r.data.definition.name || name, code: "", category: "" });
+      setDef((prev) => ({ ...r.data.definition, name: r.data.definition.name || name, code: "", category: "", access: prev?.access || { departments: [], designations: [], employees: [] } }));
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   };
 
@@ -115,6 +119,14 @@ export default function FmsImport() {
               <div><Label>Code</Label><input className={inputCls} value={def.code} placeholder="e.g. FMS-20 (auto if empty)" onChange={(e) => setDef({ ...def, code: e.target.value })} /></div>
               <div><Label>Category</Label><input className={inputCls} value={def.category} onChange={(e) => setDef({ ...def, category: e.target.value })} /></div>
             </div>
+            <div className={`mt-3 rounded-md border p-3 ${noAccess ? "border-red-300 bg-red-50" : "border-blue-200 bg-blue-50/50"}`}>
+              <Label required>Visible to — department / designation</Label>
+              <p className="mb-2 text-xs text-gray-600">Only doers of these departments or designations will see this FMS (select at least one).</p>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div><Label>Departments</Label><MultiPick allowCustom options={lk.departments} value={access.departments || []} onChange={(v) => setDef({ ...def, access: { ...access, departments: v } })} /></div>
+                <div><Label>Designations</Label><MultiPick allowCustom options={lk.designations} value={access.designations || []} onChange={(v) => setDef({ ...def, access: { ...access, designations: v } })} /></div>
+              </div>
+            </div>
           </div>
 
           {def.steps.length > 0 && (
@@ -192,7 +204,8 @@ export default function FmsImport() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white p-4">
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={importRows} onChange={(e) => setImportRows(e.target.checked)} /> Also import the {a.totalRows} existing rows (duplicate UIDs are skipped; past steps keep their Planned/Actual/Status)</label>
-            <Btn size="lg" busy={busy === "create"} onClick={create}>Create FMS{importRows ? ` & import ${a.totalRows} rows` : ""}</Btn>
+            {noAccess && <span className="text-sm text-red-600">Select a department or designation above first</span>}
+            <Btn size="lg" busy={busy === "create"} disabled={noAccess} onClick={create}>Create FMS{importRows ? ` & import ${a.totalRows} rows` : ""}</Btn>
           </div>
           {progress && (
             <div>

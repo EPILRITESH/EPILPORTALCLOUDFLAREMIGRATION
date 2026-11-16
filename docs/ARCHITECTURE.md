@@ -39,7 +39,7 @@
 | `allDashboard` | own scorecard only | any / all employees |
 | `additionalfeature` | own links | own links |
 | `em-sheet`, `whatsapp` | — | yes |
-| `fms` | FMS they can see (access list or any step's seat/assignment), add rows if allowed, act only on steps assigned to them, approve where they are approver, own notifications/filters | everything: definitions, import, seating, holidays, bulk, reports, audit, reassign/reopen/skip/planned |
+| `fms` | FMS whose "Visible to" departments/designations (mandatory) or listed employees include them — see it and add rows; a step assigned to them from outside that list still appears in My tasks; act only on steps assigned to them, approve where they are approver, own notifications/filters | everything: definitions, import, seating, holidays, bulk, reports, audit, reassign/reopen/skip/planned |
 
 ## Data model (D1)
 

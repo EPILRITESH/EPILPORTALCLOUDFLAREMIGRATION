@@ -72,6 +72,21 @@ describe("FMS calendar (sheet formula parity)", () => {
 describe("FMS workflow", () => {
   let fmsId = 0, seatId = 0;
 
+  it("requires a department or designation and shows the FMS only to them", async () => {
+    const step = [{ name: "Do it", assign: { departments: ["MIS"] } }];
+    const none = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "No access", steps: step } });
+    expect(none.status).toBe(400);
+    expect(none.json.errors.join(" ")).toMatch(/department or designation/);
+    const d = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Accounts only", access: { designations: ["accountant"] }, steps: step } });
+    expect(d.status).toBe(201);
+    const seen = async (t: string) => (await call("GET", "/api/fms/accessible", { token: t })).json.items.map((x: any) => x.name);
+    expect(await seen(asha)).toContain("Accounts only");       // designation match ignores case
+    expect(await seen(ravi)).not.toContain("Accounts only");   // MIS doer is on the step but not in the access list
+    expect((await call("POST", `/api/fms/definitions/${d.json.id}/records`, { token: ravi, body: { data: {} } })).status).toBe(403);
+    expect((await call("POST", `/api/fms/definitions/${d.json.id}/records`, { token: asha, body: { data: {} } })).status).toBe(201);
+    await call("DELETE", `/api/fms/definitions/${d.json.id}`, { token: admin });
+  });
+
   it("blocks doers from admin endpoints (RBAC)", async () => {
     for (const [m, p] of [
       ["GET", "/api/fms/definitions"], ["POST", "/api/fms/definitions"], ["GET", "/api/fms/seats"], ["POST", "/api/fms/seats"],
@@ -97,7 +112,7 @@ describe("FMS workflow", () => {
     const d = await call("POST", "/api/fms/definitions", {
       token: admin,
       body: {
-        name: "Delivery Promise", code: "FMS-T1", category: "CRM", priority: "High", start_field: "date_time",
+        name: "Delivery Promise", code: "FMS-T1", access: { departments: ["MIS"] }, category: "CRM", priority: "High", start_field: "date_time",
         fields: [
           { label: "Date & Time", type: "datetime", required: true },
           { label: "Dealer Name", type: "text", required: true },
@@ -118,7 +133,7 @@ describe("FMS workflow", () => {
     fmsId = d.json.id;
     expect(d.json.definition.fms_id).toMatch(/^FMS-\d{4}$/);
     expect(d.json.definition.steps.map((x: any) => x.code)).toEqual(["STEP-1", "STEP-2", "STEP-3", "STEP-4"]);
-    expect((await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Dupe", code: "fms-t1", steps: [] } })).status).toBe(409);
+    expect((await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Dupe", code: "fms-t1", access: { departments: ["MIS"] }, steps: [] } })).status).toBe(409);
   });
 
   it("runs a row through steps: assignment, approval reject/resubmit, condition skip, T-1 planning", async () => {
@@ -190,7 +205,10 @@ describe("FMS workflow", () => {
     expect(forAsha.json.comments.map((x: any) => x.body)).toEqual(["checking again"]);
     const sum = await call("GET", "/api/fms/my/summary", { token: asha });
     expect(sum.json.counts.pending).toBe(1);
-    expect((await call("GET", "/api/fms/accessible", { token: asha })).json.items.map((x: any) => x.code)).toContain("FMS-T1");
+    // FMS shown only to its departments (MIS); Asha still works her assigned step via My tasks
+    expect((await call("GET", "/api/fms/accessible", { token: ravi })).json.items.map((x: any) => x.code)).toContain("FMS-T1");
+    expect((await call("GET", "/api/fms/accessible", { token: asha })).json.items.map((x: any) => x.code)).not.toContain("FMS-T1");
+    expect((await call("GET", `/api/fms/definitions/${fmsId}/records`, { token: asha })).status).toBe(403);
   });
 
   it("escalates overdue steps once and reminds before due", async () => {
@@ -279,7 +297,7 @@ describe("FMS import (auto-create from a sheet)", () => {
     const an = await call("POST", "/api/fms/import/analyze", { token: admin, body: { grid, name: "x.xlsx" } });
     expect(an.status).toBe(200);
     expect(an.json.seats.map((s: any) => s.code)).toEqual(["CRMIMP", "PC-9"]);
-    const cm = await call("POST", "/api/fms/import/commit", { token: admin, body: { definition: an.json.definition } });
+    const cm = await call("POST", "/api/fms/import/commit", { token: admin, body: { definition: { ...an.json.definition, access: { departments: ["MIS"] } } } });
     expect(cm.status, JSON.stringify(cm.json)).toBe(201);
     expect(cm.json.createdSeats).toEqual(["CRMIMP", "PC-9"]);
     const id = cm.json.id;
@@ -321,7 +339,7 @@ describe("FMS import (auto-create from a sheet)", () => {
     g.push(["2026-01-09 10:00:00", "D9", "", "2026-01-10 10:00:00", "Done", "", "", "", "", "", "", "J-9"]);
     const a = analyzeGrid(g);
     expect(a.definition.steps[0].jumps).toEqual({ Close: 3 });
-    const cm = await call("POST", "/api/fms/import/commit", { token: admin, body: { definition: { ...a.definition, uid_prefix: "J-" } } });
+    const cm = await call("POST", "/api/fms/import/commit", { token: admin, body: { definition: { ...a.definition, uid_prefix: "J-", access: { departments: ["MIS"] } } } });
     expect(cm.status, JSON.stringify(cm.json)).toBe(201);
     const id = cm.json.id;
     await call("POST", `/api/fms/definitions/${id}/records/import`, { token: admin, body: { rows: a.rows } });
@@ -348,7 +366,7 @@ describe("FMS import (auto-create from a sheet)", () => {
   it("creates rows for recurring FMS once per period", async () => {
     const d = await call("POST", "/api/fms/definitions", {
       token: admin,
-      body: { name: "Daily stock check", frequency: "daily", schedule: { time: "00:00", days: [0, 1, 2, 3, 4, 5, 6] }, fields: [{ label: "Note" }], steps: [{ name: "Count", assign: { departments: ["Accounts"] }, tat: { type: "hours", value: 2 } }] },
+      body: { name: "Daily stock check", access: { departments: ["Accounts"] }, frequency: "daily", schedule: { time: "00:00", days: [0, 1, 2, 3, 4, 5, 6] }, fields: [{ label: "Note" }], steps: [{ name: "Count", assign: { departments: ["Accounts"] }, tat: { type: "hours", value: 2 } }] },
     });
     expect(d.status).toBe(201);
     const r1 = await runFmsRecurrence(env);
