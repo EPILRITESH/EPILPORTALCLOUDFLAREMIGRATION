@@ -5,7 +5,7 @@ import { formatDateIST } from "../lib/dates";
 import { publicFileUrl, storeUpload } from "../lib/files";
 import { nextTicketIds, ticketWeekStats } from "../lib/tickets";
 import { departmentOf } from "../lib/users";
-import { fail, jsonBody, nanoid, str } from "../lib/util";
+import { fail, jsonBody, nanoid, NAME_SQL, normName, sameName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 // Support tickets go to EVERY MIS employee (one row each). Rows raised together
@@ -57,19 +57,19 @@ supportTicketRoutes.post("/create", async (c) => {
 });
 
 supportTicketRoutes.get("/created", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM support_tickets WHERE created_by = ? ORDER BY rowid").bind(c.get("user").name).all<SupportRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM support_tickets WHERE ${NAME_SQL("created_by")} = ? ORDER BY rowid`).bind(normName(c.get("user").name)).all<SupportRow>();
   return c.json(await mapAll(c, results));
 });
 
 /** GET /api/support-tickets/assigned — MIS see open items + items they own */
 supportTicketRoutes.get("/assigned", async (c) => {
   const me = c.get("user");
-  const { results } = await c.env.DB.prepare("SELECT * FROM support_tickets WHERE assigned_to = ? ORDER BY rowid").bind(me.name).all<SupportRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM support_tickets WHERE ${NAME_SQL("assigned_to")} = ? ORDER BY rowid`).bind(normName(me.name)).all<SupportRow>();
   let tickets = await mapAll(c, results);
   if ((await departmentOf(c.env, me.name)) === "MIS") {
     tickets = tickets.filter((t) => {
       if (t.Status === "Pending" || t.Status === "Approved") return true;
-      if (t.Status === "InProgress" || t.Status === "Done") return t.WorkBy === me.name;
+      if (t.Status === "InProgress" || t.Status === "Done") return sameName(t.WorkBy, me.name);
       return false;
     });
   }
@@ -81,8 +81,8 @@ supportTicketRoutes.get("/all", requireAdmin, async (c) => {
   const { assignedTo, createdBy, status } = c.req.query();
   const where: string[] = [];
   const args: string[] = [];
-  if (assignedTo) { where.push("assigned_to = ?"); args.push(assignedTo); }
-  if (createdBy) { where.push("created_by = ?"); args.push(createdBy); }
+  if (assignedTo) { where.push(`${NAME_SQL("assigned_to")} = ?`); args.push(normName(assignedTo)); }
+  if (createdBy) { where.push(`${NAME_SQL("created_by")} = ?`); args.push(normName(createdBy)); }
   if (status) { where.push("status = ?"); args.push(status); }
   const sql = `SELECT * FROM support_tickets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY rowid`;
   const { results } = await c.env.DB.prepare(sql).bind(...args).all<SupportRow>();
@@ -114,12 +114,12 @@ supportTicketRoutes.patch("/status/:ticketID", async (c) => {
     if (Status === "InProgress" && current === "Pending") {
       workBy = me.name; doneDate = ""; approval = "Pending";
     } else if (Status === "Done" && current === "InProgress") {
-      if (workBy && workBy !== me.name) fail(403, "You can only complete tickets you started");
+      if (workBy && !sameName(workBy, me.name)) fail(403, "You can only complete tickets you started");
       doneDate = formatDateIST(); approval = "Pending";
     } else fail(400, "MIS can only change Pending → InProgress or InProgress → Done");
   } else {
     // Approver: ticket creator or an admin (legacy allowed any non-MIS user).
-    if (!isAdmin(c) && t.created_by !== me.name) fail(404, "Ticket not found");
+    if (!isAdmin(c) && !sameName(t.created_by, me.name)) fail(404, "Ticket not found");
     if (current !== "Done") fail(400, "You can only approve or reject completed tickets");
     if (Status === "Approved") { approval = "Approved"; newStatus = "Done"; }
     else if (Status === "Pending") { doneDate = ""; approval = "Pending"; newStatus = "Pending"; }
@@ -140,7 +140,7 @@ supportTicketRoutes.patch("/done-details/:ticketID", async (c) => {
   if (!Problem || !Solution) fail(400, "Problem and Solution are required");
   const t = await loadTicket(c);
   const me = c.get("user");
-  if (!isAdmin(c) && t.assigned_to !== me.name && t.work_by !== me.name) fail(404, "Ticket not found");
+  if (!isAdmin(c) && !sameName(t.assigned_to, me.name) && !sameName(t.work_by, me.name)) fail(404, "Ticket not found");
   const { results: updated } = await c.env.DB.prepare(
     "UPDATE support_tickets SET problem=?, solution=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE group_key=? RETURNING ticket_id",
   ).bind(String(Problem), String(Solution), t.group_key).all();

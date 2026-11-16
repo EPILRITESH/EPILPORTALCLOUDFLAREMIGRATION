@@ -49,6 +49,6 @@ export function scopedName(c: Context<AppEnv>, requested: unknown): string | nul
   const me = c.get("user").name;
   const r = typeof requested === "string" ? requested.trim() : "";
   if (isAdmin(c)) return r || me;
-  if (!r || r.toLowerCase() === me.trim().toLowerCase()) return me;
+  if (!r || r.replace(/\s+/g, " ").toLowerCase() === me.replace(/\s+/g, " ").trim().toLowerCase()) return me;
   return null;
 }

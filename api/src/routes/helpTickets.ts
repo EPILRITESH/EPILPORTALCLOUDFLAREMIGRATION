@@ -4,7 +4,7 @@ import { isAdmin, requireAdmin, requireAuth, scopedName } from "../middleware/au
 import { formatDateIST } from "../lib/dates";
 import { publicFileUrl, storeUpload } from "../lib/files";
 import { nextTicketIds, ticketWeekStats } from "../lib/tickets";
-import { fail, jsonBody, str } from "../lib/util";
+import { fail, jsonBody, NAME_SQL, normName, sameName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 export const helpTicketRoutes = new Hono<AppEnv>();
@@ -30,7 +30,7 @@ helpTicketRoutes.post("/create", async (c) => {
   const Issue = str(body.Issue);
   if (!AssignedTo || !Issue) fail(400, "AssignedTo and Issue required");
   const me = c.get("user");
-  if (AssignedTo === me.name) fail(400, "Cannot assign ticket to yourself");
+  if (sameName(AssignedTo, me.name)) fail(400, "Cannot assign ticket to yourself");
   const photo = await storeUpload(c.env, body.IssuePhoto, "help_tickets");
   const [ticketID] = await nextTicketIds(c.env, "help_ticket");
   await c.env.DB.prepare(
@@ -41,12 +41,12 @@ helpTicketRoutes.post("/create", async (c) => {
 });
 
 helpTicketRoutes.get("/created", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM help_tickets WHERE created_by = ? ORDER BY rowid").bind(c.get("user").name).all<HelpRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM help_tickets WHERE ${NAME_SQL("created_by")} = ? ORDER BY rowid`).bind(normName(c.get("user").name)).all<HelpRow>();
   return c.json(await mapAll(c, results));
 });
 
 helpTicketRoutes.get("/assigned", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM help_tickets WHERE assigned_to = ? ORDER BY rowid").bind(c.get("user").name).all<HelpRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM help_tickets WHERE ${NAME_SQL("assigned_to")} = ? ORDER BY rowid`).bind(normName(c.get("user").name)).all<HelpRow>();
   return c.json(await mapAll(c, results));
 });
 
@@ -55,8 +55,8 @@ helpTicketRoutes.get("/all", requireAdmin, async (c) => {
   const { assignedTo, createdBy, status } = c.req.query();
   const where: string[] = [];
   const args: string[] = [];
-  if (assignedTo) { where.push("assigned_to = ?"); args.push(assignedTo); }
-  if (createdBy) { where.push("created_by = ?"); args.push(createdBy); }
+  if (assignedTo) { where.push(`${NAME_SQL("assigned_to")} = ?`); args.push(normName(assignedTo)); }
+  if (createdBy) { where.push(`${NAME_SQL("created_by")} = ?`); args.push(normName(createdBy)); }
   if (status) { where.push("status = ?"); args.push(status); }
   const sql = `SELECT * FROM help_tickets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY rowid`;
   const { results } = await c.env.DB.prepare(sql).bind(...args).all<HelpRow>();
@@ -82,7 +82,7 @@ helpTicketRoutes.patch("/status/:ticketID", async (c) => {
   const t = await c.env.DB.prepare("SELECT * FROM help_tickets WHERE ticket_id = ?").bind(id).first<HelpRow>();
   if (!t) fail(404, "Ticket not found");
   const me = c.get("user");
-  if (!isAdmin(c) && t.assigned_to !== me.name && t.created_by !== me.name) fail(404, "Ticket not found");
+  if (!isAdmin(c) && !sameName(t.assigned_to, me.name) && !sameName(t.created_by, me.name)) fail(404, "Ticket not found");
   await c.env.DB.prepare("UPDATE help_tickets SET status = ?, done_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticket_id = ?")
     .bind(String(Status), Status === "Done" ? formatDateIST() : "", id).run();
   await audit(c.env, me.employeeID, "status", "help_ticket", id, { Status });

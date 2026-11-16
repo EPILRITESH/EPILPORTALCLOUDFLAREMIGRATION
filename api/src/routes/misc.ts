@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../types";
 import { requireAdmin, requireAuth } from "../middleware/auth";
-import { fail, jsonBody, str } from "../lib/util";
+import { fail, jsonBody, NAME_SQL, normName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 // ---------------------------------------------------------------------
@@ -20,8 +20,8 @@ featureRoutes.post("/add", async (c) => {
 });
 
 featureRoutes.get("/all", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM additional_features WHERE added_by = ? ORDER BY id")
-    .bind(c.get("user").name).all<any>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM additional_features WHERE ${NAME_SQL("added_by")} = ? ORDER BY id`)
+    .bind(normName(c.get("user").name)).all<any>();
   return c.json(results.map((r) => ({ AddedBy: r.added_by, FeatureName: r.feature_name, FeatureURL: r.feature_url, CreatedAt: r.created_at })));
 });
 

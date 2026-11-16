@@ -21,7 +21,15 @@ export function fail(status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500 | 502
 }
 
 export const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
-export const lc = (v: unknown): string => str(v).trim().toLowerCase();
+/**
+ * Person names are matched ignoring case and extra whitespace: the legacy sheets contain
+ * "Mohammad Sami " (trailing space), "Muskan  Khan" (double space), "chandani Rai" (case).
+ */
+export const normName = (v: unknown): string => str(v).replace(/\s+/g, " ").trim().toLowerCase();
+export const sameName = (a: unknown, b: unknown): boolean => normName(a) === normName(b);
+/** SQL twin of normName() for a column — bind normName(value) against it. Keep in sync with migration 0004. */
+export const NAME_SQL = (col: string): string => `lower(trim(replace(replace(replace(${col}, char(9), ' '), '  ', ' '), '  ', ' ')))`;
+export const lc = normName;
 
 export function parseNum(v: unknown): number {
   const n = parseInt(str(v) || "0", 10);

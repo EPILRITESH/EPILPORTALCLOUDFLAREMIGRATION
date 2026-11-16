@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../types";
 import { isAdmin, requireAdmin, requireAuth, scopedName } from "../middleware/auth";
-import { fail, jsonBody, nanoid, str } from "../lib/util";
+import { fail, jsonBody, nanoid, NAME_SQL, normName, sameName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 export const worklistRoutes = new Hono<AppEnv>();
@@ -44,7 +44,7 @@ function appliesOn(w: WlRow, d: Date): boolean {
 
 const all = async (c: Context<AppEnv>, employee?: string) => {
   const stmt = employee
-    ? c.env.DB.prepare("SELECT * FROM worklists WHERE employee_name = ? ORDER BY position, rowid").bind(employee)
+    ? c.env.DB.prepare(`SELECT * FROM worklists WHERE ${NAME_SQL("employee_name")} = ? ORDER BY position, rowid`).bind(normName(employee))
     : c.env.DB.prepare("SELECT * FROM worklists ORDER BY position, rowid");
   return (await stmt.all<WlRow>()).results;
 };
@@ -117,9 +117,11 @@ worklistRoutes.get("/admin/occupancy", requireAdmin, async (c) => {
   const target = new Date(date);
   if (isNaN(target.getTime())) fail(400, "Invalid date format");
   const rows = await all(c);
-  const names = [...new Set(rows.map((w) => w.employee_name).filter(Boolean))];
-  const occupancyList = names.map((employeeName) => {
-    const assigned = rows.filter((w) => w.employee_name === employeeName && appliesOn(w, target)).reduce((s, w) => s + minutes(w.working_time), 0);
+  // one entry per person even if their name is spelled with different spacing/case across rows
+  const byPerson = new Map<string, string>();
+  for (const w of rows) if (w.employee_name.trim() && !byPerson.has(normName(w.employee_name))) byPerson.set(normName(w.employee_name), w.employee_name.trim());
+  const occupancyList = [...byPerson].map(([key, employeeName]) => {
+    const assigned = rows.filter((w) => normName(w.employee_name) === key && appliesOn(w, target)).reduce((s, w) => s + minutes(w.working_time), 0);
     const pctRaw = (assigned / STANDARD_DAY_MINUTES) * 100;
     return {
       employeeName,
@@ -159,7 +161,7 @@ worklistRoutes.post("/bulk", async (c) => {
   const { worklists } = await jsonBody(c.req);
   if (!Array.isArray(worklists) || !worklists.length) fail(400, "worklists array is required");
   const existing = await all(c);
-  const seen = new Set(existing.map((r) => `${r.employee_name}|${r.worklist_name.toLowerCase()}`));
+  const seen = new Set(existing.map((r) => `${normName(r.employee_name)}|${r.worklist_name.trim().toLowerCase()}`));
   const created: any[] = [], skipped: any[] = [], errors: any[] = [];
   const stmts: D1PreparedStatement[] = [];
   worklists.forEach((w: Record<string, any>, i: number) => {
@@ -168,7 +170,7 @@ worklistRoutes.post("/bulk", async (c) => {
     if (!w.WorklistName || !String(w.WorklistName).trim()) return errors.push({ row: i + 1, errors: ["WorklistName is required"] });
     if (!w.Frequency || !VALID.includes(w.Frequency)) return errors.push({ row: i + 1, errors: ["Frequency must be Daily, Weekly, Monthly, or Yearly"] });
     if (!w.WorkingTime || !String(w.WorkingTime).trim()) return errors.push({ row: i + 1, errors: ["WorkingTime is required"] });
-    const key = `${emp}|${String(w.WorklistName).trim().toLowerCase()}`;
+    const key = `${normName(emp)}|${String(w.WorklistName).trim().toLowerCase()}`;
     if (seen.has(key)) return skipped.push({ row: i + 1, WorklistName: w.WorklistName, reason: "Duplicate" });
     seen.add(key);
     const id = nanoid(8);
@@ -188,7 +190,7 @@ worklistRoutes.put("/ai-time/:id", async (c) => {
   const { AITime } = await jsonBody(c.req);
   if (!AITime || !String(AITime).trim()) fail(400, "AITime is required");
   const w = await getOne(c, c.req.param("id"));
-  if (!w || (!isAdmin(c) && w.employee_name !== c.get("user").name)) fail(404, "Worklist not found");
+  if (!w || (!isAdmin(c) && !sameName(w.employee_name, c.get("user").name))) fail(404, "Worklist not found");
   await c.env.DB.prepare("UPDATE worklists SET ai_time = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE worklist_id = ?")
     .bind(String(AITime).trim(), w.worklist_id).run();
   return c.json({ ok: true, message: "AI Time updated successfully", worklist: map({ ...w, ai_time: String(AITime).trim() }) });
@@ -229,7 +231,7 @@ worklistRoutes.delete("/admin/:id", requireAdmin, async (c) => {
 worklistRoutes.put("/:id", async (c) => {
   const w = await getOne(c, c.req.param("id"));
   if (!w) fail(404, "Worklist not found");
-  if (w.employee_name !== c.get("user").name) fail(403, "You can only update your own worklist");
+  if (!sameName(w.employee_name, c.get("user").name)) fail(403, "You can only update your own worklist");
   const worklist = await applyUpdate(c, w, await jsonBody(c.req), false);
   return c.json({ ok: true, message: "Worklist updated", worklist });
 });
@@ -237,7 +239,7 @@ worklistRoutes.put("/:id", async (c) => {
 /** DELETE /api/worklist/:id — doer services.js called this but it was never implemented */
 worklistRoutes.delete("/:id", async (c) => {
   const w = await getOne(c, c.req.param("id"));
-  if (!w || (!isAdmin(c) && w.employee_name !== c.get("user").name)) fail(404, "Worklist not found");
+  if (!w || (!isAdmin(c) && !sameName(w.employee_name, c.get("user").name))) fail(404, "Worklist not found");
   await c.env.DB.prepare("DELETE FROM worklists WHERE worklist_id = ?").bind(w.worklist_id).run();
   return c.json({ ok: true, message: "Worklist deleted" });
 });

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types";
 import { isAdmin, requireAdmin, requireAuth, scopedName } from "../middleware/auth";
 import { formatDateIST, getWeekRange, isoDay, parseDDMMYYYY } from "../lib/dates";
-import { fail, jsonBody, lc, nanoid, str } from "../lib/util";
+import { fail, jsonBody, lc, nanoid, NAME_SQL, normName, sameName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 export const delegationRoutes = new Hono<AppEnv>();
@@ -39,8 +39,8 @@ const touch = "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /** GET /api/delegations — my tasks */
 delegationRoutes.get("/", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM delegations WHERE name = ? ORDER BY rowid")
-    .bind(c.get("user").name).all<DelegationRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM delegations WHERE ${NAME_SQL("name")} = ? ORDER BY rowid`)
+    .bind(normName(c.get("user").name)).all<DelegationRow>();
   return c.json(results.map(mapTask));
 });
 
@@ -66,8 +66,8 @@ delegationRoutes.get("/filter", async (c) => {
   const target = scopedName(c, selectedName);
   if (target === null) fail(403, "Admin access required");
   const { weekStart, weekEnd } = getWeekRange(month, week);
-  const { results } = await c.env.DB.prepare("SELECT * FROM delegations WHERE lower(trim(name)) = ? ORDER BY rowid")
-    .bind(lc(target)).all<DelegationRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM delegations WHERE ${NAME_SQL("name")} = ? ORDER BY rowid`)
+    .bind(normName(target)).all<DelegationRow>();
 
   const filtered = results.filter((t) => {
     const created = parseDDMMYYYY(t.created_date);
@@ -128,7 +128,7 @@ delegationRoutes.delete("/delete/:id", requireAdmin, async (c) => {
 /** Doer can act on own task; admin on any. */
 async function ownTask(c: any): Promise<DelegationRow> {
   const t = await getTask(c, c.req.param("id"));
-  if (!t || (!isAdmin(c) && t.name !== c.get("user").name)) fail(404, "Task not found");
+  if (!t || (!isAdmin(c) && !sameName(t.name, c.get("user").name))) fail(404, "Task not found");
   return t;
 }
 
@@ -169,8 +169,8 @@ delegationRoutes.get("/search/by-name", async (c) => {
   let sql = "SELECT * FROM delegations";
   const where: string[] = [];
   const args: string[] = [];
-  if (lc(name) !== "all") { where.push("lower(name) = ?"); args.push(name.toLowerCase()); }
-  if (assignBy && lc(assignBy) !== "all") { where.push("lower(followup) = ?"); args.push(assignBy.toLowerCase()); }
+  if (lc(name) !== "all") { where.push(`${NAME_SQL("name")} = ?`); args.push(normName(name)); }
+  if (assignBy && lc(assignBy) !== "all") { where.push(`${NAME_SQL("followup")} = ?`); args.push(normName(assignBy)); }
   if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
   const { results } = await c.env.DB.prepare(`${sql} ORDER BY rowid`).bind(...args).all<DelegationRow>();
   return c.json(results.map(mapTask));

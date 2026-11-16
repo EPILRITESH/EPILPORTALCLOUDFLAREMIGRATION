@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { hashPassword } from "../src/lib/password";
 import { runMonthlyGeneration } from "../src/lib/checklistGen";
 import { getWeekRange } from "../src/lib/dates";
+import { NAME_SQL } from "../src/lib/util";
 
 const BASE = "https://api.test";
 let PW_HASH = "";
@@ -336,3 +337,40 @@ describe("dashboard", () => {
     expect(del).toEqual({ totalWork: 3, completedWork: 2, pendingWork: 1, onTimeWork: 1, pendingPercent: "33.33", delayPercent: "50.00" });
   });
 });
+
+describe("names with legacy spacing/case (\"Mohammad Sami \", \"Muskan  Khan\", \"chandani Rai\")", () => {
+  it("shows every record to its owner and lets them act on it", async () => {
+    await env.DB.prepare("INSERT OR IGNORE INTO users (employee_id, role, name, mobile, password_hash, department, designation) VALUES ('SAMI01','employee','Mohammad Sami','9800000001',?,'MIS','MIS')").bind(PW_HASH).run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO delegations (task_id, name, task_name, created_date, deadline) VALUES ('NM1','Mohammad Sami ','old trailing space','01/11/2026 10:00:00','30/11/2026'), ('NM2','mohammad  sami','case + double space','01/11/2026 10:00:00','30/11/2026')"),
+      env.DB.prepare("INSERT INTO checklist_tasks (task_id, name, task, planned) VALUES ('NMC1','Mohammad Sami ','Daily MIS','16/11/2026 23:59:59')"),
+      env.DB.prepare("INSERT INTO support_tickets (ticket_id, group_key, created_by, assigned_to, issue, status, created_date) VALUES ('#NM001','g:nm','Asha','Mohammad Sami ','VPN','Pending','16/11/2026 09:00:00')"),
+      env.DB.prepare("INSERT INTO help_tickets (ticket_id, created_by, assigned_to, issue, status, created_date) VALUES ('#NMH01','Asha','Mohammad Sami ','Printer','Pending','16/11/2026 09:00:00')"),
+      env.DB.prepare("INSERT INTO worklists (worklist_id, employee_name, worklist_name, frequency, working_time) VALUES ('NMW1','Mohammad Sami ','MIS report','Daily','60M')"),
+      env.DB.prepare("INSERT INTO additional_features (added_by, feature_name, feature_url) VALUES ('Mohammad Sami ','Looker','https://x.example')"),
+    ]);
+    const t = await login("SAMI01");
+    const ids = async (p: string) => ((await call("GET", p, { token: t })).json as any[]).map((x: any) => x.TaskID ?? x.TicketID ?? x.FeatureName);
+    expect(await ids("/api/delegations")).toEqual(expect.arrayContaining(["NM1", "NM2"]));
+    expect(await ids("/api/checklist")).toContain("NMC1");
+    expect(await ids("/api/support-tickets/assigned")).toContain("#NM001");
+    expect(await ids("/api/helpTickets/assigned")).toContain("#NMH01");
+    expect(await ids("/api/additionalfeature/all")).toContain("Looker");
+    expect((await call("GET", "/api/worklist/my", { token: t })).json.data.map((w: any) => w.WorkListId)).toContain("NMW1");
+    // and can act on them (owner checks use the same rule)
+    expect((await call("PATCH", "/api/delegations/done/NM1", { token: t })).status).toBe(200);
+    expect((await call("PATCH", "/api/checklist/done/NMC1", { token: t })).status).toBe(200);
+    expect((await call("PATCH", `/api/support-tickets/status/${encodeURIComponent("#NM001")}`, { token: t, body: { Status: "InProgress" } })).status).toBe(200);
+    expect((await call("PUT", "/api/worklist/ai-time/NMW1", { token: t, body: { AITime: "20M" } })).status).toBe(200);
+    // dashboard counts both spellings for the same person
+    const admin = await login("ADM001", true);
+    const d = await call("GET", "/api/allDashboard/all-dashboard?month=11&week=all&selectedName=Mohammad Sami", { token: admin });
+    expect(d.json.data[0].delegation.totalWork).toBeGreaterThanOrEqual(2);
+  });
+
+  it("uses the normalised-name indexes (no full table scan)", async () => {
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN SELECT * FROM checklist_tasks WHERE ${NAME_SQL("name")} = ?`).bind("x").all<{ detail: string }>();
+    expect(plan.results.map((r) => r.detail).join(" ")).toMatch(/USING INDEX idx_checklist_tasks_name_norm/);
+  });
+});
+

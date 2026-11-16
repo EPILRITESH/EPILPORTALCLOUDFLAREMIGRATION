@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types";
 import { isAdmin, requireAdmin, requireAuth, scopedName } from "../middleware/auth";
 import { formatDateIST, getWeekRange, isoDay, parseDDMMYYYY } from "../lib/dates";
-import { fail, jsonBody, lc, nanoid, str } from "../lib/util";
+import { fail, jsonBody, lc, nanoid, NAME_SQL, normName, sameName, str } from "../lib/util";
 import { generateNextMonth, insertSlots, plannedSlots, type TemplateRow } from "../lib/checklistGen";
 import { audit } from "../lib/audit";
 
@@ -24,8 +24,8 @@ const mapChecklist = (r: ChecklistRow) => ({
 /** GET /api/checklist — my open (not yet done) items */
 checklistRoutes.get("/", async (c) => {
   const { results } = await c.env.DB.prepare(
-    "SELECT * FROM checklist_tasks WHERE name = ? AND trim(actual) = '' ORDER BY rowid",
-  ).bind(c.get("user").name).all<ChecklistRow>();
+    `SELECT * FROM checklist_tasks WHERE ${NAME_SQL("name")} = ? AND trim(actual) = '' ORDER BY rowid`,
+  ).bind(normName(c.get("user").name)).all<ChecklistRow>();
   return c.json(results.map(mapChecklist));
 });
 
@@ -36,7 +36,7 @@ checklistRoutes.get("/search/by-name", async (c) => {
   if (!isAdmin(c) && lc(name) !== lc(c.get("user").name)) fail(403, "Admin access required");
   const stmt = lc(name) === "all"
     ? c.env.DB.prepare("SELECT * FROM checklist_tasks ORDER BY rowid")
-    : c.env.DB.prepare("SELECT * FROM checklist_tasks WHERE lower(name) = ? ORDER BY rowid").bind(name.toLowerCase());
+    : c.env.DB.prepare(`SELECT * FROM checklist_tasks WHERE ${NAME_SQL("name")} = ? ORDER BY rowid`).bind(normName(name));
   const { results } = await stmt.all<ChecklistRow>();
   return c.json(results.map(mapChecklist));
 });
@@ -67,7 +67,7 @@ checklistRoutes.post("/", async (c) => {
 checklistRoutes.patch("/done/:id", async (c) => {
   const id = c.req.param("id");
   const t = await c.env.DB.prepare("SELECT name FROM checklist_tasks WHERE task_id = ?").bind(id).first<{ name: string }>();
-  if (!t || (!isAdmin(c) && t.name !== c.get("user").name)) fail(404, "Task not found");
+  if (!t || (!isAdmin(c) && !sameName(t.name, c.get("user").name))) fail(404, "Task not found");
   const doneAt = formatDateIST();
   await c.env.DB.prepare("UPDATE checklist_tasks SET actual = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE task_id = ?")
     .bind(doneAt, id).run();
@@ -82,8 +82,8 @@ checklistRoutes.get("/filter", async (c) => {
   const target = scopedName(c, selectedName);
   if (target === null) fail(403, "Admin access required");
   const { weekStart, weekEnd } = getWeekRange(month, week);
-  const { results } = await c.env.DB.prepare("SELECT * FROM checklist_tasks WHERE lower(trim(name)) = ? ORDER BY rowid")
-    .bind(lc(target)).all<ChecklistRow>();
+  const { results } = await c.env.DB.prepare(`SELECT * FROM checklist_tasks WHERE ${NAME_SQL("name")} = ? ORDER BY rowid`)
+    .bind(normName(target)).all<ChecklistRow>();
   const filtered = results.filter((t) => {
     const planned = parseDDMMYYYY(t.planned);
     const actual = parseDDMMYYYY(t.actual);

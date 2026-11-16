@@ -3,7 +3,7 @@ import type { AppEnv } from "../types";
 import { isAdmin, requireAdmin, requireAuth } from "../middleware/auth";
 import { dateDMY, nowStamp } from "../lib/dates";
 import { designationOf } from "../lib/users";
-import { fail, jsonBody, nanoid, parseNum, str } from "../lib/util";
+import { fail, jsonBody, nanoid, NAME_SQL, normName, parseNum, sameName, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
 // Port of routes/training.js. Assignment rule (unchanged): every employee gets
@@ -96,11 +96,11 @@ const assignedFor = (approved: Template[], emp: { designation: string }) => [
 ];
 
 function buildAssignedView(employees: { name: string; department: string; designation: string }[], approved: Template[], records: ReturnType<typeof mapRecord>[]) {
-  const recMap = new Map(records.map((r) => [`${r.EmployeeName}|||${r.TemplateId}`, r]));
+  const recMap = new Map(records.map((r) => [`${normName(r.EmployeeName)}|||${r.TemplateId}`, r]));
   const rows: any[] = [];
   for (const emp of employees) {
     for (const t of assignedFor(approved, emp)) {
-      const rec = recMap.get(`${emp.name}|||${t.TemplateId}`);
+      const rec = recMap.get(`${normName(emp.name)}|||${t.TemplateId}`);
       rows.push({
         EmployeeName: emp.name, Department: emp.department, Designation: emp.designation,
         TemplateId: t.TemplateId, TemplateName: t.TemplateName,
@@ -235,7 +235,7 @@ trainingRoutes.get("/my", async (c) => {
   const approved = templates.filter((t) => t.Approval === "Approved");
   const designation = (await designationOf(c.env, me.name)) || me.designation;
   const assigned = buildAssignedView([{ name: me.name, department: me.department, designation }], approved, records);
-  const progress = new Map(records.filter((r) => r.EmployeeName === me.name).map((r) => [r.TemplateId, r.Progress]));
+  const progress = new Map(records.filter((r) => sameName(r.EmployeeName, me.name)).map((r) => [r.TemplateId, r.Progress]));
   const rows = assigned.map((r) => ({ ...r, Progress: progress.get(r.TemplateId) || {} }));
   return c.json({ ok: true, records: rows, total: rows.length, summary: summarizeAssigned(assigned) });
 });
@@ -399,7 +399,7 @@ trainingRoutes.delete("/qa/:qaId", requireAdmin, async (c) => {
 // DOER: start + progress
 // ---------------------------------------------------------------------
 const recordFor = (c: Context<AppEnv>, name: string, templateId: string) =>
-  c.env.DB.prepare("SELECT * FROM training_records WHERE employee_name = ? AND template_id = ?").bind(name, templateId).first<RecordRow>();
+  c.env.DB.prepare(`SELECT * FROM training_records WHERE ${NAME_SQL("employee_name")} = ? AND template_id = ? ORDER BY id LIMIT 1`).bind(normName(name), templateId).first<RecordRow>();
 
 trainingRoutes.post("/start", async (c) => {
   const { templateId } = await jsonBody(c.req);
