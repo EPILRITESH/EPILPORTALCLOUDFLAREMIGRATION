@@ -88,6 +88,10 @@ app.notFound((c) => c.json({ success: false, error: `Cannot ${c.req.method} ${c.
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return err.getResponse();
+  // Cloudflare D1 free plan: daily row-write limit reached → explain instead of a bare 500
+  if (/exceeded D1's .*daily row write limit|daily row write limit/i.test(String((err as Error)?.message) + String((err as any)?.cause?.message))) {
+    return c.json({ success: false, error: "Database daily write limit reached (Cloudflare D1 free plan). Nothing was saved — your data is safe. Saving works again after 5:30 AM IST (midnight UTC), or upgrade to the Workers Paid plan.", code: "D1_WRITE_LIMIT" }, 503);
+  }
   console.error(`[${new Date().toISOString()}] ${c.req.method} ${c.req.path}:`, err);
   return c.json({ success: false, error: "Internal server error" }, 500);
 });

@@ -187,6 +187,20 @@ export default function RecordView({ recordId, focusStepId, onClose, onChanged, 
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <StatusBadge status={rec.status} /> <PriorityBadge p={rec.priority} />
             {rec.deleted && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Deleted</span>}
+            {isAdmin && (
+              <span className="ml-auto flex gap-2">
+                {rec.deleted
+                  ? <Btn size="sm" kind="secondary" busy={busy === "del"} onClick={async () => {
+                    setBusy("del"); setErr("");
+                    try { await api.post(`/definitions/${d.fms.id}/records/bulk`, { ids: [rec.id], action: "restore" }); flash("Row restored"); changed(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+                  }}>Restore row</Btn>
+                  : <Btn size="sm" kind="danger" busy={busy === "del"} onClick={async () => {
+                    if (!(await ask({ title: `Delete row ${rec.uid}?`, message: "The row moves to Deleted rows and can be restored from there.", danger: true, ok: "Delete" }))) return;
+                    setBusy("del"); setErr("");
+                    try { await api.delete(`/records/${rec.id}`); onChanged?.(); onClose(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+                  }}>Delete row</Btn>}
+              </span>
+            )}
             <span className="text-gray-500">Created {fmtDT(rec.created_at)} by {rec.created_by_name || "—"}</span>
             {rec.completed_at && <span className="text-gray-500">· Completed {fmtDT(rec.completed_at)}</span>}
           </div>

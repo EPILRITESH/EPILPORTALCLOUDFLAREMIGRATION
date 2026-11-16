@@ -171,6 +171,50 @@ function ImportRows({ def, onClose, onDone }) {
   );
 }
 
+// Add / rename / remove columns straight from the data grid (saves the FMS setup; a version is kept).
+function Columns({ fmsId, onClose, onDone }) {
+  const [def, setDef] = useState(null);
+  const [cols, setCols] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [ask, dialog] = useDialog();
+  useEffect(() => { api.get(`/definitions/${fmsId}`).then((r) => { setDef(r.data.definition); setCols(r.data.definition.fields.map((f) => ({ ...f }))); }).catch((e) => setErr(errMsg(e))); }, [fmsId]);
+  const TYPES = [["text", "Text"], ["textarea", "Long text"], ["number", "Number"], ["date", "Date"], ["datetime", "Date & time"], ["select", "Dropdown"], ["multiselect", "Multi-select"], ["checkbox", "Yes / No"], ["email", "Email"], ["phone", "Phone"], ["url", "Link"], ["employee", "Employee"]];
+  const set = (i, patch) => setCols(cols.map((c, k) => (k === i ? { ...c, ...patch } : c)));
+  const save = async () => {
+    setBusy(true); setErr("");
+    try { await api.put(`/definitions/${fmsId}`, { ...def, fields: cols }); onDone(); onClose(); }
+    catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal open wide onClose={onClose} title="Columns" footer={<><Btn kind="secondary" onClick={onClose}>Cancel</Btn><Btn busy={busy} disabled={!def} onClick={save}>Save columns</Btn></>}>
+      {dialog}
+      {!def && !err && <Spinner />}
+      {def && (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500">Removing a column hides it everywhere; values already in rows are kept and come back if you add a column with the same key. Every save keeps a version (All FMS → Versions).</p>
+          {cols.map((c, i) => (
+            <div key={c.id || `n${i}`} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1.5">
+              <input className="min-w-[10rem] flex-1 rounded border px-2 py-1 text-sm" value={c.label} placeholder="Column name" onChange={(e) => set(i, { label: e.target.value })} />
+              <select className="rounded border px-2 py-1 text-sm" value={c.type} disabled={!!c.formula} onChange={(e) => set(i, { type: e.target.value })}>{TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+              {["select", "multiselect"].includes(c.type) && <input className="w-56 rounded border px-2 py-1 text-sm" placeholder="Options: a, b, c" value={(c.options || []).join(", ")} onChange={(e) => set(i, { options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} />}
+              {c.formula && <span className="rounded bg-indigo-100 px-1.5 text-xs text-indigo-800" title={c.formula}>ƒ calculated</span>}
+              <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={!!c.required} onChange={(e) => set(i, { required: e.target.checked })} />required</label>
+              <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={c.in_list !== false} onChange={(e) => set(i, { in_list: e.target.checked })} />show in grid</label>
+              <Btn size="sm" kind="ghost" className="text-red-600" onClick={async () => {
+                if (c.id && !(await ask({ title: `Remove column "${c.label}"?`, message: "It disappears from the grid, forms and exports after you save.", danger: true, ok: "Remove" }))) return;
+                setCols(cols.filter((_, k) => k !== i));
+              }}>Remove</Btn>
+            </div>
+          ))}
+          <Btn size="sm" kind="secondary" onClick={() => setCols([...cols, { label: "", type: "text", options: [], required: false, in_list: true }])}>+ Add column</Btn>
+        </div>
+      )}
+      <div className="mt-3"><ErrorBox>{err}</ErrorBox></div>
+    </Modal>
+  );
+}
+
 function Duplicates({ def, onClose, onDone }) {
   const [fields, setFields] = useState([]);
   const [res, setRes] = useState(null);
@@ -230,6 +274,7 @@ export default function RecordsGrid({ fmsId, isAdmin, onBack }) {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [dupes, setDupes] = useState(false);
+  const [columns, setColumns] = useState(false);
   const [sel, setSel] = useState([]);
   const [busy, setBusy] = useState("");
   const [saved, setSaved] = useState([]);
@@ -299,6 +344,7 @@ export default function RecordsGrid({ fmsId, isAdmin, onBack }) {
         <div className="flex flex-wrap gap-2">
           {perm.create && <Btn onClick={() => setAdding(true)}>+ New entry</Btn>}
           {isAdmin && <Btn kind="secondary" onClick={() => setImporting(true)}>Import rows</Btn>}
+          {isAdmin && <Btn kind="secondary" onClick={() => setColumns(true)}>Columns</Btn>}
           {isAdmin && <Btn kind="secondary" onClick={() => setDupes(true)}>Duplicates</Btn>}
           <Btn kind="secondary" busy={busy === "exp-xlsx"} onClick={() => exportAs("xlsx")}>Excel</Btn>
           <Btn kind="secondary" busy={busy === "exp-csv"} onClick={() => exportAs("csv")}>CSV</Btn>
@@ -379,6 +425,7 @@ export default function RecordsGrid({ fmsId, isAdmin, onBack }) {
                 {listFields.map((x) => <th key={x.key} className="whitespace-nowrap px-2 py-2 text-left">{x.label}</th>)}
                 {def.steps.map((s) => <th key={s.id} className="whitespace-nowrap border-l border-gray-600 px-2 py-2 text-left" title={s.how}>{s.code}<div className="font-normal text-gray-300">{s.name}</div></th>)}
                 <th className="px-2 py-2 text-left">Row</th>
+                {isAdmin && <th className="px-2 py-2" />}
               </tr>
             </thead>
             <tbody>
@@ -400,6 +447,16 @@ export default function RecordsGrid({ fmsId, isAdmin, onBack }) {
                     );
                   })}
                   <td className="px-2 py-1.5"><StatusBadge status={r.status} /></td>
+                  {isAdmin && (
+                    <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+                      {r.deleted
+                        ? <button type="button" title="Restore row" className="rounded px-1.5 py-0.5 text-blue-700 hover:bg-blue-100" onClick={async () => { try { await api.post(`/definitions/${fmsId}/records/bulk`, { ids: [r.id], action: "restore" }); flash(`${r.uid} restored`); load(); } catch (e) { flash(errMsg(e), "error"); } }}>↺</button>
+                        : <button type="button" title="Delete row" className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-100" onClick={async () => {
+                          if (!(await ask({ title: `Delete row ${r.uid}?`, message: "It moves to Deleted rows (tick “Deleted rows” to see and restore).", danger: true, ok: "Delete" }))) return;
+                          try { await api.delete(`/records/${r.id}`); flash(`${r.uid} deleted`); load(); } catch (e) { flash(errMsg(e), "error"); }
+                        }}>🗑</button>}
+                    </td>
+                  )}
                 </tr>
               ))}
               {!items.length && <tr><td colSpan={99} className="px-3 py-10 text-center text-gray-500">No rows match.</td></tr>}
@@ -413,6 +470,7 @@ export default function RecordsGrid({ fmsId, isAdmin, onBack }) {
       {adding && <RecordForm definition={def} onClose={() => setAdding(false)} onCreated={(r, another) => { flash(`Row ${r.uid} created`); load(); if (!another) setAdding(false); }} />}
       {importing && <ImportRows def={def} onClose={() => setImporting(false)} onDone={load} />}
       {dupes && <Duplicates def={def} onClose={() => setDupes(false)} onDone={load} />}
+      {columns && <Columns fmsId={fmsId} onClose={() => setColumns(false)} onDone={() => { api.get(`/definitions/${fmsId}`).then((r) => setDef({ ...r.data.definition, seats: r.data.seats })).catch(() => {}); load(); flash("Columns saved"); }} />}
     </div>
   );
 }
