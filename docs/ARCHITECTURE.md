@@ -71,7 +71,8 @@ Design choices worth knowing:
 The legacy Google Sheets stay a live, human-readable backup of all data.
 
 ```
-portal write → D1 row → trigger → sheet_sync_queue ──(cron, every minute)──▶ legacy Google Sheets (same tabs & columns)
+portal write → D1 row → trigger → sheet_sync_queue ──(immediately after the save; cron every minute as safety net)──▶ legacy Google Sheets
+old portal / hand edits in Sheets ──(transition pull, every 5 minutes)──▶ D1   (portal wins on conflicts)
 EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 em_sheet_rows → /api/em-sheet
 ```
 - **Capture**: triggers on every synced table (migration 0003) record the changed row's key, so API
@@ -84,8 +85,16 @@ EM report (formulas in Sheets) ──(every 10 minutes, read-only)──▶ D1 e
   `Consolidated`, exactly as before; `SupportTicketsMaster` L/P/Q and `HelpTicketsMaster` I/J are skipped.
 - **Formula injection**: text starting with `=`, `@`, or a non-numeric `+`/`-` is written as plain text.
 - **Admin controls**: `GET /api/sheets-sync/status`, `POST /api/sheets-sync/run`,
-  `POST /api/sheets-sync/clear-queue`, `POST /api/sheets-sync/pull-em-sheet`.
-- **Switch**: `SHEETS_SYNC_ENABLED` (off until the old portal stops writing to the sheets);
+  `POST /api/sheets-sync/clear-queue`, `POST /api/sheets-sync/pull`, `POST /api/sheets-sync/backfill {since}`,
+  `POST /api/sheets-sync/pull-em-sheet`.
+- **Real-time**: after every successful write the API pushes the queue in the background (a few
+  seconds); the sync keeps draining while new changes arrive, and the every-minute cron catches anything left.
+- **Transition pull** (`api/src/lib/sheetsPull.ts`, `SHEETS_PULL_ENABLED`): while the old portal is still
+  used, new/changed rows in DelegationMaster, HelpTicketsMaster, SupportTicketsMaster, WorkList and new
+  completions in Consolidated are copied into D1 every 5 minutes. A record with a pending portal change is
+  never overwritten (portal wins); rows deleted in the sheet are not deleted in D1; the pull's own writes are
+  not echoed back. Turn it off once the old portal is retired.
+- **Switches**: `SHEETS_SYNC_ENABLED` (D1 → Sheets) and `SHEETS_PULL_ENABLED` (Sheets → D1);
   `SHEETS_TAB_PREFIX` targets test/staging tabs (e.g. `ZZTEST_`).
 
 | Sheet tab | Source table | Key column | Written columns |

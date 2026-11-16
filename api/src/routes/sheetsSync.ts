@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types";
 import { requireAdmin, requireAuth } from "../middleware/auth";
-import { pullEmSheet, runSheetsSync, syncStatus } from "../lib/sheetsSync";
+import { backfillQueue, pullEmSheet, runSheetsSync, syncStatus } from "../lib/sheetsSync";
+import { runSheetsPull } from "../lib/sheetsPull";
+import { fail, jsonBody } from "../lib/util";
 import { audit } from "../lib/audit";
 
 // Admin controls for the Google Sheets backup sync (all admin-only).
@@ -23,6 +25,22 @@ sheetsSyncRoutes.post("/clear-queue", async (c) => {
   const r = await c.env.DB.prepare("DELETE FROM sheet_sync_queue").run();
   await audit(c.env, c.get("user").employeeID, "clear-queue", "sheets_sync", "", { removed: r.meta.changes });
   return c.json({ ok: true, removed: r.meta.changes });
+});
+
+/** POST /api/sheets-sync/pull — copy changes made directly in the sheets (old portal) into D1 now */
+sheetsSyncRoutes.post("/pull", async (c) => {
+  const r = await runSheetsPull(c.env, { force: true });
+  await audit(c.env, c.get("user").employeeID, "pull", "sheets_sync", "", r);
+  return c.json({ ok: true, results: r });
+});
+
+/** POST /api/sheets-sync/backfill { since: ISO time } — re-queue rows changed since then */
+sheetsSyncRoutes.post("/backfill", async (c) => {
+  const { since } = await jsonBody(c.req);
+  if (!since || isNaN(Date.parse(String(since)))) fail(400, "since (ISO date-time) is required");
+  const queued = await backfillQueue(c.env, new Date(String(since)).toISOString());
+  await audit(c.env, c.get("user").employeeID, "backfill", "sheets_sync", "", { since, queued });
+  return c.json({ ok: true, queued });
 });
 
 /** POST /api/sheets-sync/pull-em-sheet — refresh the EM report from Google Sheets now */

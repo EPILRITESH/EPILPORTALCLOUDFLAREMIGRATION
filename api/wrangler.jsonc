@@ -32,7 +32,9 @@
     "MAX_UPLOAD_BYTES": "5242880",
     "FILE_STORAGE": "cloudinary",
     // D1 → Google Sheets backup. Turn on only after the old portal has stopped writing to the sheets.
-    "SHEETS_SYNC_ENABLED": "false",
+    "SHEETS_SYNC_ENABLED": "true",
+    // While the old portal still writes to the sheets: copy its changes into D1 every 5 minutes.
+    "SHEETS_PULL_ENABLED": "true",
     "EM_SHEET_TAB_NAME": "EM SHEET WITH RITEH SIR",
     "CLOUDINARY_FOLDER": "employee_documents",
     "WHATSAPP_TEMPLATE_PENDING": "pendingtask",

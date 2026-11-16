@@ -18,6 +18,7 @@ import { requireAdmin, requireAuth } from "./middleware/auth";
 import { runMonthlyGeneration } from "./lib/checklistGen";
 import { sheetsSyncRoutes } from "./routes/sheetsSync";
 import { pullEmSheet, runSheetsSync, syncEnabled } from "./lib/sheetsSync";
+import { pullEnabled, runSheetsPull } from "./lib/sheetsPull";
 
 /**
  * Express matched routes case-insensitively and ignored trailing slashes, and
@@ -42,6 +43,15 @@ app.use("*", async (c, next) => {
     allowHeaders: ["Content-Type", "Authorization", "X-Admin-Registration-Key"],
     maxAge: 86400,
   })(c, next);
+});
+
+// Real-time backup: after any successful write, push the queued changes to Google Sheets
+// in the background (the response is not delayed). The every-minute cron is the safety net.
+app.use("/api/*", async (c, next) => {
+  await next();
+  if (c.req.method !== "GET" && c.req.method !== "OPTIONS" && c.res.status < 400 && syncEnabled(c.env)) {
+    c.executionCtx.waitUntil(runSheetsSync(c.env).catch((e) => console.error("sheets sync", e.message)));
+  }
 });
 
 app.get("/health", async (c) => {
@@ -88,7 +98,10 @@ export default {
     }
     // every minute: Google Sheets backup; every 10 minutes: refresh the EM report from Sheets
     if (syncEnabled(env)) ctx.waitUntil(runSheetsSync(env).then((r) => { if (!("skipped" in r) && r.processed) console.log("sheets sync", JSON.stringify(r)); }));
-    if (new Date(event.scheduledTime).getUTCMinutes() % 10 === 0) ctx.waitUntil(pullEmSheet(env).catch((e) => console.error("em pull", e.message)));
+    const minute = new Date(event.scheduledTime).getUTCMinutes();
+    if (minute % 10 === 0) ctx.waitUntil(pullEmSheet(env).catch((e) => console.error("em pull", e.message)));
+    // transition: copy old-portal changes from the sheets into D1 every 5 minutes
+    if (minute % 5 === 2 && pullEnabled(env)) ctx.waitUntil(runSheetsPull(env).then((r) => console.log("sheets pull", JSON.stringify(r))).catch((e) => console.error("sheets pull", e.message)));
   },
 } satisfies ExportedHandler<Env>;
 

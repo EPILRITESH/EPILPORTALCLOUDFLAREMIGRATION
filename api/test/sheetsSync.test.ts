@@ -1,7 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashPassword } from "../src/lib/password";
-import { cellValue, pullEmSheet, runSheetsSync } from "../src/lib/sheetsSync";
+import { backfillQueue, cellValue, pullEmSheet, runSheetsSync } from "../src/lib/sheetsSync";
+import { runSheetsPull } from "../src/lib/sheetsPull";
+import { app } from "../src/index";
 import { _resetGoogleTokenCache } from "../src/lib/google";
 
 // ---------------------------------------------------------------- fake Google Sheets
@@ -262,4 +264,80 @@ describe("Google Sheets backup sync", () => {
       expect((await api(m, p, emp, m === "POST" ? {} : undefined)).status).toBe(403);
     }
   });
+
+  it("pulls old-portal changes from the sheets into D1 (portal wins, no echo back)", async () => {
+    const c = await cfg();
+    const { admin } = await tokens();
+    // D1 has two delegations; one also has a pending portal edit
+    const a = await api("POST", "/api/delegations", admin, { TaskName: "Portal task", Deadline: "01/12/2026", Name: "Asha" });
+    const b = await api("POST", "/api/delegations", admin, { TaskName: "Edited in portal", Deadline: "01/12/2026", Name: "Asha" });
+    await runSheetsSync(c); // both now in the sheet, queue empty
+    await api("PUT", `/api/delegations/update/${b.json.TaskID}`, admin, { TaskName: "Edited in portal v2" }); // pending
+    // old portal: completes A, edits B, creates a brand-new task
+    const g = tabs.get("DelegationMaster")!;
+    const rowA = g.rows.find((r) => r[0] === a.json.TaskID)!;
+    rowA[7] = "16/11/2026 09:01:33"; rowA[10] = "Completed";
+    g.rows.find((r) => r[0] === b.json.TaskID)![2] = "Edited in OLD portal";
+    g.rows.push(["OLDNEW", "Ravi", "Created in old portal", "16/11/2026 10:00:00", "20/11/2026", "", "", "", "0", "High", "Pending", "Boss", "", "Pending"]);
+    g.rowCount = g.rows.length + 5;
+
+    const r = await runSheetsPull(c, { force: true });
+    // exact counts can include rows from other test files (shared D1) — assert the outcomes below
+    expect((r.DelegationMaster as any).inserted).toBeGreaterThanOrEqual(1);
+    expect((r.DelegationMaster as any).skippedPending).toBeGreaterThanOrEqual(1);
+    const get = (id: string) => env.DB.prepare("SELECT task_name, status, final_date FROM delegations WHERE task_id = ?").bind(id).first<any>();
+    expect(await get(a.json.TaskID)).toMatchObject({ status: "Completed", final_date: "16/11/2026 09:01:33" });
+    expect((await get(b.json.TaskID))!.task_name).toBe("Edited in portal v2"); // portal wins
+    expect(await get("OLDNEW")).toMatchObject({ task_name: "Created in old portal" });
+    // pulled rows are not queued to be written back; the portal's pending edit still is
+    const q = (await env.DB.prepare("SELECT k FROM sheet_sync_queue WHERE tbl = 'delegations'").all<{ k: string }>()).results.map((x) => x.k);
+    expect(q).toEqual([b.json.TaskID]);
+    // second pull: nothing new
+    const again = (await runSheetsPull(c, { force: true })).DelegationMaster as any;
+    expect(again.inserted).toBe(0); // idempotent: nothing new on a second pull
+    // next sync pushes the portal's version over the old-portal edit
+    await runSheetsSync(c);
+    expect(findRow("DelegationMaster", 0, b.json.TaskID)[0][2]).toBe("Edited in portal v2");
+  });
+
+  it("applies new checklist completions from Consolidated once (resume point)", async () => {
+    const c = await cfg();
+    await env.DB.prepare("INSERT OR IGNORE INTO checklist_tasks (task_id, name, task, planned) VALUES ('CK1','Asha','Count','16/11/2026 23:59:59'), ('CK2','Asha','Count','17/11/2026 23:59:59')").run();
+    await env.DB.prepare("DELETE FROM sheet_sync_queue").run();
+    await env.DB.prepare("DELETE FROM sheet_sync_state WHERE name = 'pull:Consolidated:rows'").run();
+    tabs.get("Consolidated")!.rows.push(["CK1", "16/11/2026 10:10:41"], ["CK1", "16/11/2026 11:00:00"]);
+    let r = await runSheetsPull(c, { force: true });
+    expect(r.Consolidated).toMatchObject({ newRows: 2, completionsApplied: 1 });
+    expect((await env.DB.prepare("SELECT actual FROM checklist_tasks WHERE task_id='CK1'").first<any>())!.actual).toBe("16/11/2026 10:10:41"); // first wins (VLOOKUP)
+    tabs.get("Consolidated")!.rows.push(["CK2", "16/11/2026 12:00:00"]);
+    r = await runSheetsPull(c, { force: true });
+    expect(r.Consolidated).toMatchObject({ newRows: 1, completionsApplied: 1 }); // only rows after the resume point
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM sheet_sync_queue WHERE tbl='checklist_tasks'").first<any>())!.n).toBe(0);
+  });
+
+  it("backfill re-queues rows changed since a time", async () => {
+    await tokens();
+    const before = new Date(Date.now() - 1000).toISOString();
+    await env.DB.prepare("INSERT INTO delegations (task_id, name, task_name) VALUES ('BF1','Asha','x')").run();
+    await env.DB.prepare("DELETE FROM sheet_sync_queue").run();
+    const q = await backfillQueue(env, before);
+    expect(q.delegations).toBeGreaterThanOrEqual(1);
+    expect((await env.DB.prepare("SELECT COUNT(*) n FROM sheet_sync_queue WHERE tbl='delegations' AND k='BF1'").first<any>())!.n).toBe(1);
+  });
+
+  it("syncs to Sheets immediately after a write (no waiting for the cron)", async () => {
+    const c = await cfg();
+    const { admin } = await tokens();
+    const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p), passThroughOnException: () => {}, props: {} } as unknown as ExecutionContext;
+    const res = await app.request("/api/delegations", { method: "POST", headers: { Authorization: `Bearer ${admin}`, "Content-Type": "application/json" }, body: JSON.stringify({ TaskName: "Instant", Deadline: "01/12/2026", Name: "Asha" }) }, c, ctx);
+    const { TaskID } = (await res.json()) as any;
+    await Promise.all(waits);
+    expect(findRow("DelegationMaster", 0, TaskID)).toHaveLength(1);
+    // reads do not trigger a sync
+    const n = waits.length;
+    await app.request("/api/delegations", { headers: { Authorization: `Bearer ${admin}` } }, c, ctx);
+    expect(waits.length).toBe(n);
+  });
 });
+

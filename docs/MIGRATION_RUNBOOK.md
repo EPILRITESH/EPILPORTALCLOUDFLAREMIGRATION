@@ -88,16 +88,19 @@ GitHub settings for automated deploys:
 4. Point the old portal URLs at the new Workers, or share the new URLs.
 5. Keep the Google Sheets **read-only** for 30 days as a fallback, then archive them.
 
-## Turning on the Google Sheets backup
-The sync writes into the **same** spreadsheets the old portal uses, so it must only be switched on
-once the old portal has stopped writing to them (otherwise both systems edit the same rows).
-1. Stop the old Render backend (write freeze).
-2. Re-run steps 3 and 5 so D1 holds the latest sheet data, then **clear the sync queue** — the
-   re-import itself queues every row: `POST /api/sheets-sync/clear-queue` (admin).
-3. Set `"SHEETS_SYNC_ENABLED": "true"` in `api/wrangler.jsonc` and deploy (or push to `main`).
-4. Make one change in the portal and check `GET /api/sheets-sync/status` (admin) — pending drops to 0
-   within a minute and every sheet shows `ok: true`. Changes made in the portal before step 3 are
-   still queued and are written on the first run.
+## Google Sheets backup (live since 16 Nov 2026)
+Both directions are ON in production (`api/wrangler.jsonc`):
+- `SHEETS_SYNC_ENABLED=true` — every portal change is written to the legacy sheets within seconds.
+- `SHEETS_PULL_ENABLED=true` — **transition mode**: changes made in the old portal are copied into D1
+  every 5 minutes (portal wins on conflicts).
+
+When the old portal is retired: set `SHEETS_PULL_ENABLED` to `"false"` and deploy. Until then avoid
+**deleting** delegations/worklists in the old portal — its delete rewrites the whole sheet range from
+its own cached copy, which can drop rows the new portal just added.
+
+Checks (admin): `GET /api/sheets-sync/status` (pending changes, last result per sheet, last pull).
+If changes were made while sync was off or before triggers existed:
+`POST /api/sheets-sync/backfill {"since": "<ISO time>"}` then `POST /api/sheets-sync/run`.
 
 Google secrets on the Worker: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` and the eight
 `GOOGLE_SHEET_ID*` values (same names as the legacy `.env`). The service account needs **Editor**

@@ -253,8 +253,24 @@ export async function runSheetsSync(env: Env, { limit = 1500, force = false } = 
     .bind(String(now + 240), now).run();
   if (!lock.meta.changes) return { skipped: "another sync is running" as const };
   try {
+    let total = 0, totalFailed = 0;
+    const all: Record<string, unknown> = {};
+    // Keep draining while new changes arrive during the run (saves made while we held the lock).
+    for (let round = 0; round < 4; round++) {
+      const r = await syncRound(env, limit);
+      total += r.processed; totalFailed += r.failed; Object.assign(all, r.results);
+      if (!r.processed || r.failed || r.remaining === 0) break;
+    }
+    return { processed: total, failed: totalFailed, results: all };
+  } finally {
+    await env.DB.prepare("UPDATE sheet_sync_state SET value = '0' WHERE name = 'lock'").run();
+  }
+}
+
+async function syncRound(env: Env, limit: number) {
+  {
     const { results: queue } = await env.DB.prepare("SELECT id, tbl, k FROM sheet_sync_queue ORDER BY id LIMIT ?").bind(limit).all<{ id: number; tbl: string; k: string }>();
-    if (!queue.length) return { processed: 0, results: {} };
+    if (!queue.length) return { processed: 0, failed: 0, results: {}, remaining: 0 };
     const failed = new Set<number>();
     const results: Record<string, unknown> = {};
     const propsCache = new Map<string, Props>();
@@ -280,10 +296,27 @@ export async function runSheetsSync(env: Env, { limit = 1500, force = false } = 
       const chunk = done.slice(i, i + 90);
       await env.DB.prepare(`DELETE FROM sheet_sync_queue WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).run();
     }
-    return { processed: done.length, failed: failed.size, results };
-  } finally {
-    await env.DB.prepare("UPDATE sheet_sync_state SET value = '0' WHERE name = 'lock'").run();
+    const remaining = (await env.DB.prepare("SELECT COUNT(*) AS n FROM sheet_sync_queue").first<{ n: number }>())!.n;
+    return { processed: done.length, failed: failed.size, results, remaining };
   }
+}
+
+/** Re-queue every row changed since `since` (ISO) — e.g. portal changes made before triggers existed. */
+export async function backfillQueue(env: Env, since: string) {
+  const sources: [string, string, string][] = [
+    ["users", "role || ':' || employee_id", "updated_at"],
+    ["delegations", "task_id", "updated_at"],
+    ["checklist_tasks", "task_id", "updated_at"],
+    ["checklist_templates", "template_id", "created_at"],
+    ["help_tickets", "ticket_id", "updated_at"],
+    ["support_tickets", "ticket_id", "updated_at"],
+    ["worklists", "worklist_id", "updated_at"],
+    ["training_templates", "template_id", "created_at"],
+    ["additional_features", "added_by || '|||' || feature_name || '|||' || feature_url", "created_at"],
+  ];
+  const res = await env.DB.batch(sources.map(([t, k, ts]) =>
+    env.DB.prepare(`INSERT INTO sheet_sync_queue (tbl, k) SELECT '${t}', ${k} FROM ${t} WHERE ${ts} > ?`).bind(since)));
+  return Object.fromEntries(sources.map(([t], i) => [t, res[i].meta.changes]));
 }
 
 /** The EM report is computed BY formulas in Google Sheets → copy it into D1 (Sheets → D1). */

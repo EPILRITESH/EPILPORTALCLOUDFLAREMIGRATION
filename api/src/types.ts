@@ -16,6 +16,8 @@ export interface Env {
   CLOUDINARY_FOLDER?: string;
   /** "true" turns on the D1 → Google Sheets backup sync. */
   SHEETS_SYNC_ENABLED?: string;
+  /** "true" while the old portal still writes to the sheets: pull those changes into D1 every 5 minutes. */
+  SHEETS_PULL_ENABLED?: string;
   /** Optional tab-name prefix (e.g. "ZZTEST_") to target test/staging tabs instead of the real ones. */
   SHEETS_TAB_PREFIX?: string;
   EM_SHEET_TAB_NAME?: string;
