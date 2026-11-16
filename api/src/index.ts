@@ -19,6 +19,8 @@ import { runMonthlyGeneration } from "./lib/checklistGen";
 import { sheetsSyncRoutes } from "./routes/sheetsSync";
 import { pullEmSheet, runSheetsSync, syncEnabled } from "./lib/sheetsSync";
 import { pullEnabled, runSheetsPull } from "./lib/sheetsPull";
+import { fmsRoutes } from "./routes/fms";
+import { runFmsRecurrence, runFmsReminders } from "./lib/fms/cron";
 
 /**
  * Express matched routes case-insensitively and ignored trailing slashes, and
@@ -80,6 +82,7 @@ app.route("/api/worklist", worklistRoutes);
 app.route("/api/training", trainingRoutes);
 app.route("/api/em-sheet", emSheetRoutes);
 app.route("/api/sheets-sync", sheetsSyncRoutes);
+app.route("/api/fms", fmsRoutes);
 
 app.notFound((c) => c.json({ success: false, error: `Cannot ${c.req.method} ${c.req.path}` }, 404));
 
@@ -93,6 +96,7 @@ export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron === "0 * * * *") {
+      ctx.waitUntil(runFmsRecurrence(env).then((r) => { if (r.created.length) console.log("fms recurrence", JSON.stringify(r)); }).catch((e) => console.error("fms recurrence", e.message)));
       ctx.waitUntil(runMonthlyGeneration(env).then((r) => console.log("checklist generation", JSON.stringify({ ...r, createdTasks: undefined, count: "createdTasks" in r ? r.createdTasks.length : 0 }))));
       return;
     }
@@ -105,6 +109,7 @@ export default {
     ctx.waitUntil(pull.then(() => (syncEnabled(env) ? runSheetsSync(env) : null))
       .then((r) => { if (r && !("skipped" in r) && r.processed) console.log("sheets sync", JSON.stringify(r)); })
       .catch((e) => console.error("sheets sync", e.message)));
+    if (minute % 5 === 0) ctx.waitUntil(runFmsReminders(env).then((r) => { if (r.reminded || r.escalated) console.log("fms reminders", JSON.stringify(r)); }).catch((e) => console.error("fms reminders", e.message)));
     if (minute % 10 === 0) ctx.waitUntil(pullEmSheet(env).catch((e) => console.error("em pull", e.message)));
   },
 } satisfies ExportedHandler<Env>;

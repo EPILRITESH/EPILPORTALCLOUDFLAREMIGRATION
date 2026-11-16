@@ -14,6 +14,13 @@ const EXT: Record<string, string> = {
   "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
   "image/gif": "gif", "image/webp": "webp", "application/pdf": "pdf",
 };
+// FMS attachments may also be office documents / CSV
+const DOCS = /^(application\/(vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document|presentationml\.presentation)|vnd\.ms-excel|msword)|text\/(csv|plain))$/;
+const DOC_EXT: Record<string, string> = {
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx", "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx", "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx", "text/csv": "csv", "text/plain": "txt",
+};
 const URL_TTL_SECONDS = 7 * 24 * 3600;
 const enc = new TextEncoder();
 
@@ -57,17 +64,18 @@ async function uploadToCloudinary(env: Env, file: File, folder: string): Promise
 }
 
 /** Validate and store an uploaded File. Returns the stored reference ("" when no file). */
-export async function storeUpload(env: Env, file: unknown, folder: string): Promise<string> {
+export async function storeUpload(env: Env, file: unknown, folder: string, opts: { allowDocs?: boolean } = {}): Promise<string> {
   if (!(file instanceof File) || file.size === 0) return "";
   const max = parseInt(env.MAX_UPLOAD_BYTES || "5242880", 10);
-  if (file.size > max) fail(400, "Image too large (max 5MB). Please compress below 2MB and retry.");
-  if (!ALLOWED.test(file.type)) {
+  if (file.size > max) fail(400, opts.allowDocs ? "File too large (max 5MB)." : "Image too large (max 5MB). Please compress below 2MB and retry.");
+  if (opts.allowDocs && !ALLOWED.test(file.type) && !DOCS.test(file.type)) fail(400, "Allowed files: images, PDF, Excel, Word, PowerPoint, CSV or text (max 5MB).");
+  if (!opts.allowDocs && !ALLOWED.test(file.type)) {
     fail(400, "Only JPG, PNG, GIF, WEBP or PDF allowed (max 5MB). NOTE: iPhone HEIC photos are NOT supported - please send as JPG/screenshot.");
   }
   if ((env.FILE_STORAGE || "cloudinary") !== "r2") return uploadToCloudinary(env, file, folder);
   if (!env.FILES) fail(503, "File storage is not configured (FILE_STORAGE=r2 but no FILES bucket bound).");
   const now = new Date();
-  const key = `${folder}/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${nanoid(16)}.${EXT[file.type] || "bin"}`;
+  const key = `${folder}/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${nanoid(16)}.${EXT[file.type] || DOC_EXT[file.type] || "bin"}`;
   await env.FILES.put(key, file.stream(), {
     httpMetadata: { contentType: file.type },
     customMetadata: { originalName: file.name.slice(0, 200) },
