@@ -5,6 +5,7 @@ import { publicFileUrl, storeUpload } from "../lib/files";
 import { hashPassword, isLegacyHash, verifyPassword } from "../lib/password";
 import { findByEmployeeId } from "../lib/users";
 import { issueToken, requireAuth, isAdmin } from "../middleware/auth";
+import { verify } from "hono/jwt";
 import { fail, jsonBody, nanoid, str } from "../lib/util";
 import { audit } from "../lib/audit";
 
@@ -168,17 +169,21 @@ adminAuthRoutes.post("/admin/register", async (c) => {
   let allowed = adminCount === 0;
   const key = String(body.registrationKey || c.req.header("X-Admin-Registration-Key") || "");
   if (!allowed && c.env.ADMIN_REGISTRATION_KEY && key && key === c.env.ADMIN_REGISTRATION_KEY) allowed = true;
+  let reason = "Log in to the Admin portal first (in this same browser), then open Register — or enter the Admin Registration Key.";
+  if (!allowed && key) reason = "Admin Registration Key is incorrect (or no key is configured). Leave it empty and log in as an admin instead.";
   if (!allowed) {
     const token = (c.req.header("Authorization") || "").split(" ")[1];
-    if (token) {
+    if (token && token !== "null" && token !== "undefined") {
       try {
-        const { verify } = await import("hono/jwt");
         const p = (await verify(token, c.env.JWT_SECRET, "HS256")) as { role?: string };
         allowed = p.role === "admin";
-      } catch { /* fall through */ }
+        if (!allowed) reason = "You are logged in as an employee. Only an admin can register a new admin — log in to the Admin portal.";
+      } catch {
+        reason = "Your admin login has expired. Log in to the Admin portal again, then register.";
+      }
     }
   }
-  if (!allowed) fail(403, "Admin registration requires a valid registration key or an existing admin");
+  if (!allowed) fail(403, `Admin registration requires a valid registration key or an existing admin. ${reason}`);
 
   const dup = await c.env.DB.prepare(
     "SELECT name FROM users WHERE role='admin' AND (name = ? OR mobile = ?) LIMIT 1",

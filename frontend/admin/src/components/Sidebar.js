@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
-import { FaTasks, FaClipboardList, FaLifeRing, FaHeadset, FaBars, FaTimes, FaCodeBranch, FaList } from "react-icons/fa";
+import { FaTasks, FaClipboardList, FaLifeRing, FaHeadset, FaBars, FaTimes, FaCodeBranch, FaList, FaUserPlus } from "react-icons/fa";
 import axios from "axios";
 
 // MenuItem Component
@@ -152,6 +152,7 @@ export default function Sidebar({ mobile }) {
             </MenuItem>
             <MenuItem to="/worklist" icon={FaList} onClick={closeSidebar}>WorkList</MenuItem>
             <MenuItem to="/training" icon={FaClipboardList} onClick={closeSidebar}>Training</MenuItem>
+            <MenuItem to="/register" icon={FaUserPlus} onClick={closeSidebar}>Add Admin</MenuItem>
           </nav>
 
           {/* ✅ VERSION AT BOTTOM - MOBILE */}
@@ -190,6 +191,7 @@ export default function Sidebar({ mobile }) {
         </MenuItem>
         <MenuItem to="/worklist" icon={FaList} count={0}>WorkList</MenuItem>
         <MenuItem to="/training" icon={FaClipboardList} count={0}>Training</MenuItem>
+        <MenuItem to="/register" icon={FaUserPlus} count={0}>Add Admin</MenuItem>
       </nav>
 
       {/* ✅ VERSION AT BOTTOM - DESKTOP */}

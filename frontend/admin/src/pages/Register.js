@@ -10,6 +10,15 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [department, setDepartment] = useState("");
   const [registrationKey, setRegistrationKey] = useState("");
+  // Who (if anyone) is logged in to the admin portal in this browser — their login authorises the sign-up.
+  const loggedInAdmin = (() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "null");
+      return localStorage.getItem("token") && u?.name ? u : null;
+    } catch {
+      return null;
+    }
+  })();
 
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
@@ -47,6 +56,20 @@ export default function Register() {
         <h2 className="text-3xl font-bold text-center mb-6 text-gray-800">
           Create Account
         </h2>
+
+        {loggedInAdmin ? (
+          <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded p-3 mb-4">
+            Logged in as admin <b>{loggedInAdmin.name}</b> — the Registration Key is not needed.
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded p-3 mb-4">
+            Only an existing admin can add a new admin.{" "}
+            <button type="button" onClick={() => navigate("/login")} className="font-semibold underline">
+              Log in as admin first
+            </button>
+            , then open this page again — or enter the Admin Registration Key below.
+          </div>
+        )}
 
         {error && (
           <div className="text-red-500 text-center mb-4 text-sm font-medium">
@@ -105,7 +128,9 @@ export default function Register() {
             onChange={(e) => setDepartment(e.target.value)}
           />
 
-          <label className="text-gray-700 font-medium">Admin Registration Key</label>
+          <label className="text-gray-700 font-medium">
+            Admin Registration Key {loggedInAdmin && <span className="text-gray-400 font-normal">(not needed)</span>}
+          </label>
           <input
             type="password"
             placeholder="Provided by your system owner"

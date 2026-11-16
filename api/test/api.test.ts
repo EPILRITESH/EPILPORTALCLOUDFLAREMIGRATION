@@ -129,6 +129,15 @@ describe("auth", () => {
     expect((await call("POST", "/api/auth/register", { form })).status).toBe(400);
   });
 
+  it("explains exactly why admin registration was refused", async () => {
+    const body = { name: "New Admin", mobile: "9666666666", password: "pass1234", department: "X" };
+    const reg = (token?: string, extra = {}) => call("POST", "/api/adminauth/admin/register", { token, body: { ...body, ...extra } });
+    expect((await reg()).json.error).toMatch(/Log in to the Admin portal first/);
+    expect((await reg(await login("EMP001"))).json.error).toMatch(/logged in as an employee/);
+    expect((await reg("eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYWRtaW4ifQ.forged")).json.error).toMatch(/expired/);
+    expect((await reg(undefined, { registrationKey: "guess" })).json.error).toMatch(/Registration Key is incorrect/);
+  });
+
   it("locks admin self-registration once an admin exists", async () => {
     const body = { name: "Intruder", mobile: "9444444444", password: "pass1234", department: "X" };
     expect((await call("POST", "/api/adminauth/admin/register", { body })).status).toBe(403);
