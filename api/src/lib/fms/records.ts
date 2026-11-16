@@ -3,7 +3,7 @@ import type { Env } from "../../types";
 import { fail } from "../util";
 import { parseInstant } from "./calendar";
 import { coerceValues } from "./definitions";
-import { evalCondition, history, j, plannedFor, progress, type Actor, type Bundle, type Condition } from "./engine";
+import { buildRefs, computeFormulas, evalCondition, history, j, planStep, progress, type Actor, type Bundle, type Condition } from "./engine";
 
 export interface RowInput {
   data: Record<string, unknown>;
@@ -114,9 +114,18 @@ export async function createRecordsBulk(env: Env, b: Bundle, rows: RowInput[], a
         if (active) return { s, status: "waiting", planned: "", actual: "", outcome: "", values: sv };
         if (!evalCondition(j<Condition | null>(s.condition, null), allVals)) return { s, status: "skipped", planned: "", actual: "", outcome: "", values: sv };
         active = s.position;
-        const planned = iso(imp.planned) || plannedFor(s, b, start, lastActual, allVals);
-        return { s, status: "pending", planned, actual: "", outcome: "", values: sv };
+        return { s, status: "pending", planned: iso(imp.planned), actual: "", outcome: "", values: sv };
       });
+      // calculated columns, then plan the active step (rules / TAT) when the sheet had no planned time
+      const pseudo = steps.map((x) => ({ id: 0, record_id: 0, step_id: x.s.id, position: x.s.position, status: x.status, outcome: x.outcome, planned_at: x.planned, actual_at: x.actual,
+        assigned_to: "", done_by: "", done_by_name: "", step_values: JSON.stringify(x.values), remarks: "", submitted_at: "", approved_by: "", approved_at: "", rejection_reason: "", delay_minutes: 0, updated_at: "" }));
+      const f = computeFormulas(b, { data: v.values, uid, start_at: start, created_at: now }, pseudo);
+      if (f.changed) { v.values = f.data; for (const x of steps) { const add = f.stepValues.get(x.s.id); if (add) x.values = { ...x.values, ...add }; } }
+      const act = steps.find((x) => x.status === "pending");
+      if (act && !act.planned) {
+        const refs = buildRefs(b, { data: v.values, uid, start_at: start, created_at: now }, pseudo.map((p, k) => ({ ...p, step_values: JSON.stringify(steps[k].values) })));
+        act.planned = planStep(act.s, b, refs, lastActual);
+      }
       return { v, uid, start, steps, active, overdueAtImport: !!active && steps.some((x) => x.status === "pending" && x.planned && x.planned < now) };
     });
     const ins = await env.DB.batch(plan.map((p) => env.DB.prepare(

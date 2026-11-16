@@ -4,7 +4,7 @@ import api, { errMsg } from "./api";
 import { Btn, Modal, FieldInput, Label, ErrorBox } from "./ui";
 
 export default function RecordForm({ definition, onClose, onCreated }) {
-  const fields = definition.fields || [];
+  const fields = (definition.fields || []).filter((f) => !f.formula); // calculated columns fill themselves
   const [data, setData] = useState(() => Object.fromEntries(fields.map((f) => {
     if (f.default_value) return [f.key, f.type === "multiselect" ? f.default_value.split(",").map((x) => x.trim()) : f.default_value];
     if (f.key === definition.start_field && f.type === "datetime") return [f.key, new Date().toISOString()];

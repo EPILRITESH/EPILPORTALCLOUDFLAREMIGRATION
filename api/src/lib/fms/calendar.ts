@@ -34,7 +34,7 @@ export function normaliseCalendar(raw: unknown): FmsCalendar {
   };
 }
 
-function isWorkingDay(local: Date, cal: FmsCalendar, holidays: Set<string>) {
+export function isWorkingDay(local: Date, cal: FmsCalendar, holidays: Set<string>) {
   return !cal.weeklyOff.includes(local.getUTCDay()) && !holidays.has(ymd(local));
 }
 
@@ -110,3 +110,7 @@ export function formatIST(iso: string): string {
 
 /** IST calendar date (YYYY-MM-DD) of an instant. */
 export const istDay = (d: Date) => ymd(toLocal(d));
+
+/** Shift an instant by IST wall-clock helpers (exported for formulas). */
+export const toIST = toLocal;
+export const fromIST = fromLocal;

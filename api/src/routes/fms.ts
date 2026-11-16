@@ -8,7 +8,8 @@ import { fail, jsonBody, str } from "../lib/util";
 import { audit } from "../lib/audit";
 import { formatIST } from "../lib/fms/calendar";
 import { coerceValues, getDefinition, normaliseDefinition, saveDefinition, toInput, type DefinitionInput, type StepInput } from "../lib/fms/definitions";
-import { canActOn, canApprove, fmsVisible, history, j, type Bundle, type RecordStepRow } from "../lib/fms/engine";
+import { buildRefs, canActOn, canApprove, fmsVisible, formulaCtx, history, j, loadBundle, refreshAllFormulas, refreshFormulas, type Bundle, type RecordStepRow } from "../lib/fms/engine";
+import { castResult, evaluate, FormulaError, FUNCTION_NAMES } from "../lib/fms/formula";
 import { actor, bundleOr404, idParam, mustView, page } from "../lib/fms/http";
 import { createRecord, createRecordsBulk, type RowInput } from "../lib/fms/records";
 import { analyzeGrid } from "../lib/fms/importer";
@@ -90,6 +91,9 @@ fmsRoutes.put("/definitions/:id", requireAdmin, async (c) => {
   const n = normaliseDefinition(await jsonBody<DefinitionInput>(c.req));
   await saveDefinition(c.env, n, actor(c).name, id);
   await audit(c.env, actor(c).employeeID, "update", "fms", String(id), { name: n.def.name });
+  // formulas may have changed: recompute calculated columns of existing rows in the background
+  const fresh = await loadBundle(c.env, id);
+  if (fresh?.fields.some((f) => f.formula)) c.executionCtx.waitUntil(refreshAllFormulas(c.env, fresh).catch((e) => console.error("fms formulas", e.message)));
   return c.json({ success: true, id, definition: await getDefinition(c.env, id) });
 });
 
@@ -166,6 +170,41 @@ fmsRoutes.post("/definitions/:id/versions/:vid/restore", requireAdmin, async (c)
   await audit(c.env, actor(c).employeeID, "restore_version", "fms", String(id), { version: snap.version });
   return c.json({ success: true, definition: await getDefinition(c.env, id) });
 });
+
+/** POST /definitions/:id/recalculate — recompute calculated columns of every row */
+fmsRoutes.post("/definitions/:id/recalculate", requireAdmin, async (c) => {
+  const b = await bundleOr404(c, idParam(c));
+  const r = await refreshAllFormulas(c.env, b);
+  await audit(c.env, actor(c).employeeID, "recalculate", "fms", String(b.def.id), r);
+  return c.json({ success: true, ...r });
+});
+
+/**
+ * POST /formula/test {formula, type?, fms_id?, record_id?} — try a formula (builder "Test" button) against a row
+ * of the FMS (latest row when record_id is not given). Returns the value or the error.
+ */
+fmsRoutes.post("/formula/test", requireAdmin, async (c) => {
+  const body = await jsonBody(c.req);
+  const src = str(body.formula);
+  let b: Bundle | null = null, rec: any = null, rsteps: RecordStepRow[] = [];
+  if (body.fms_id) {
+    b = await bundleOr404(c, Number(body.fms_id));
+    rec = await c.env.DB.prepare(`SELECT * FROM fms_records WHERE fms_id = ? AND deleted = 0 ${body.record_id ? "AND id = ?" : ""} ORDER BY id DESC LIMIT 1`)
+      .bind(b.def.id, ...(body.record_id ? [Number(body.record_id)] : [])).first<any>();
+    if (rec) rsteps = (await c.env.DB.prepare("SELECT * FROM fms_record_steps WHERE record_id = ? ORDER BY position").bind(rec.id).all<RecordStepRow>()).results;
+  }
+  const refs = b && rec ? buildRefs(b, { data: j(rec.data, {}), uid: rec.uid, start_at: rec.start_at, created_at: rec.created_at }, rsteps) : {};
+  try {
+    const v = evaluate(src, formulaCtx(b || { calendar: { workStart: "10:00", workEnd: "19:00", weeklyOff: [0] }, holidays: new Set() }, refs));
+    const out = castResult(v, str(body.type) || "text");
+    return c.json({ success: true, value: out, display: v instanceof Date ? formatIST(v.toISOString()) : out, row: rec?.uid || null });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof FormulaError ? e.message : "Invalid formula", row: rec?.uid || null }, 400);
+  }
+});
+
+/** GET /formula/help — functions available in formulas */
+fmsRoutes.get("/formula/help", requireAdmin, (c) => c.json({ success: true, functions: FUNCTION_NAMES }));
 
 // ================================================================== import (auto-create from a sheet)
 /** POST /import/analyze {grid: Cell[][], name} → proposed FMS + parsed rows */
@@ -511,6 +550,7 @@ fmsRoutes.put("/records/:rid", requireAdmin, async (c) => {
   if (body.priority && ["Low", "Medium", "High", "Critical"].includes(body.priority)) { sets.push("priority = ?"); args.push(body.priority); }
   await c.env.DB.prepare(`UPDATE fms_records SET ${sets.join(", ")} WHERE id = ?`).bind(...args, rid).run();
   const changed = Object.keys(values).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(values[k]));
+  await refreshFormulas(c.env, b, rid);
   await history(c.env, rid, null, "row_edited", actor(c), str(body.reason), { changed: Object.fromEntries(changed.map((k) => [k, { from: before[k] ?? "", to: values[k] }])) });
   return c.json({ success: true, data: merged });
 });

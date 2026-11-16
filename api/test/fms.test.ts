@@ -4,6 +4,7 @@ import { hashPassword } from "../src/lib/password";
 import { addWorkingDays, addWorkingHours, DEFAULT_CALENDAR, formatIST, parseInstant } from "../src/lib/fms/calendar";
 import { recurrenceDue, runFmsRecurrence } from "../src/lib/fms/cron";
 import { analyzeGrid } from "../src/lib/fms/importer";
+import { evaluate } from "../src/lib/fms/formula";
 
 const BASE = "https://api.test";
 
@@ -72,19 +73,30 @@ describe("FMS calendar (sheet formula parity)", () => {
 describe("FMS workflow", () => {
   let fmsId = 0, seatId = 0;
 
-  it("requires a department or designation and shows the FMS only to them", async () => {
-    const step = [{ name: "Do it", assign: { departments: ["MIS"] } }];
-    const none = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "No access", steps: step } });
+  it("requires Visible-to; step doers see the FMS but act only on their own step", async () => {
+    const none = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "No access", steps: [{ name: "x", assign: { employees: ["FEMP3"] } }] } });
     expect(none.status).toBe(400);
     expect(none.json.errors.join(" ")).toMatch(/department or designation/);
-    const d = await call("POST", "/api/fms/definitions", { token: admin, body: { name: "Accounts only", access: { designations: ["accountant"] }, steps: step } });
+    const d = await call("POST", "/api/fms/definitions", {
+      token: admin,
+      body: { name: "Accounts only", access: { designations: ["accountant"] }, steps: [{ name: "One", assign: { employees: ["FEMP3"] } }, { name: "Two", assign: { employees: ["FEMP2"] } }] },
+    });
     expect(d.status).toBe(201);
-    const seen = async (t: string) => (await call("GET", "/api/fms/accessible", { token: t })).json.items.map((x: any) => x.name);
-    expect(await seen(asha)).toContain("Accounts only");       // designation match ignores case
-    expect(await seen(ravi)).not.toContain("Accounts only");   // MIS doer is on the step but not in the access list
-    expect((await call("POST", `/api/fms/definitions/${d.json.id}/records`, { token: ravi, body: { data: {} } })).status).toBe(403);
-    expect((await call("POST", `/api/fms/definitions/${d.json.id}/records`, { token: asha, body: { data: {} } })).status).toBe(201);
-    await call("DELETE", `/api/fms/definitions/${d.json.id}`, { token: admin });
+    const id = d.json.id;
+    const seen = async (t: string) => (await call("GET", "/api/fms/accessible", { token: t })).json.items.find((x: any) => x.id === id);
+    expect(await seen(asha)).toMatchObject({ can_create: true });   // Visible to (designation, case-insensitive)
+    expect(await seen(meena)).toMatchObject({ can_create: true });  // STEP-1 doer
+    expect(await seen(ravi)).toMatchObject({ can_create: false });  // STEP-2 doer: sees it, cannot add entries
+    expect((await call("POST", `/api/fms/definitions/${id}/records`, { token: ravi, body: { data: {} } })).status).toBe(403);
+    const r = await call("POST", `/api/fms/definitions/${id}/records`, { token: meena, body: { data: {} } });
+    expect(r.status).toBe(201);
+    const rec = (await call("GET", `/api/fms/records/${r.json.id}`, { token: ravi })).json.record;
+    expect(rec.steps.map((s: any) => s.can_act)).toEqual([false, true]);
+    expect((await call("POST", `/api/fms/steps/${rec.steps[0].id}/complete`, { token: ravi, body: {} })).status).toBe(403);
+    expect((await call("POST", `/api/fms/steps/${rec.steps[0].id}/complete`, { token: meena, body: {} })).status).toBe(200);
+    expect((await call("POST", `/api/fms/steps/${rec.steps[1].id}/complete`, { token: meena, body: {} })).status).toBe(403);
+    expect((await call("POST", `/api/fms/steps/${rec.steps[1].id}/complete`, { token: ravi, body: {} })).status).toBe(200);
+    await call("DELETE", `/api/fms/definitions/${id}`, { token: admin });
   });
 
   it("blocks doers from admin endpoints (RBAC)", async () => {
@@ -92,7 +104,7 @@ describe("FMS workflow", () => {
       ["GET", "/api/fms/definitions"], ["POST", "/api/fms/definitions"], ["GET", "/api/fms/seats"], ["POST", "/api/fms/seats"],
       ["POST", "/api/fms/import/analyze"], ["POST", "/api/fms/import/commit"], ["GET", "/api/fms/reports"], ["GET", "/api/fms/audit"],
       ["POST", "/api/fms/holidays"], ["GET", "/api/fms/approvals"], ["POST", "/api/fms/jobs/reminders"], ["POST", "/api/fms/steps/1/reassign"],
-      ["POST", "/api/fms/steps/1/reopen"], ["POST", "/api/fms/steps/1/planned"], ["DELETE", "/api/fms/records/1"], ["PUT", "/api/fms/records/1"],
+      ["POST", "/api/fms/steps/1/reopen"], ["POST", "/api/fms/formula/test"], ["GET", "/api/fms/formula/help"], ["POST", "/api/fms/definitions/1/recalculate"], ["POST", "/api/fms/steps/1/planned"], ["DELETE", "/api/fms/records/1"], ["PUT", "/api/fms/records/1"],
     ] as const) {
       expect((await call(m, p, { token: asha, body: m === "GET" ? undefined : {} })).status, `${m} ${p}`).toBe(403);
     }
@@ -205,10 +217,9 @@ describe("FMS workflow", () => {
     expect(forAsha.json.comments.map((x: any) => x.body)).toEqual(["checking again"]);
     const sum = await call("GET", "/api/fms/my/summary", { token: asha });
     expect(sum.json.counts.pending).toBe(1);
-    // FMS shown only to its departments (MIS); Asha still works her assigned step via My tasks
+    // FMS shown to its Visible-to departments (MIS) and to step doers
     expect((await call("GET", "/api/fms/accessible", { token: ravi })).json.items.map((x: any) => x.code)).toContain("FMS-T1");
-    expect((await call("GET", "/api/fms/accessible", { token: asha })).json.items.map((x: any) => x.code)).not.toContain("FMS-T1");
-    expect((await call("GET", `/api/fms/definitions/${fmsId}/records`, { token: asha })).status).toBe(403);
+    expect((await call("GET", "/api/fms/accessible", { token: asha })).json.items.map((x: any) => x.code)).toContain("FMS-T1"); // STEP-2 doer
   });
 
   it("escalates overdue steps once and reminds before due", async () => {
@@ -260,6 +271,90 @@ describe("FMS workflow", () => {
     const rep = await call("GET", `/api/fms/reports?fms=${fmsId}`, { token: admin });
     expect(rep.json.by_step).toHaveLength(4);
     expect(rep.json.totals.done).toBeGreaterThan(0);
+  });
+});
+
+describe("FMS formulas, plan rules and step order", () => {
+  it("evaluates Excel-style formulas", () => {
+    const ctx = { ref: (n: string) => ({ qty: 150, d: new Date("2026-01-03T04:30:00Z"), name: "Tulsi" } as any)[n] ?? "", cal: { workStart: "10:00", workEnd: "19:00", weeklyOff: [0] }, holidays: new Set<string>() };
+    expect(evaluate('IF({qty} > 100, "BIG", "SMALL")', ctx)).toBe("BIG");
+    expect(evaluate('UPPER({name}) & "//" & TEXT({d}, "MMM-YY")', ctx)).toBe("TULSI//Jan-26");
+    expect(formatIST((evaluate("ADDWORKDAYS({d}, 1)", ctx) as Date).toISOString())).toBe("05/01/2026 10:00"); // Sat → Mon
+    expect(evaluate('DAYS(DATE(2026,1,10), {d})', ctx)).toBeCloseTo(6.58, 1);
+    expect(formatIST((evaluate('SETTIME({d} + 2, "18:00")', ctx) as Date).toISOString())).toBe("05/01/2026 18:00");
+    expect(() => evaluate("IF({qty} > , 1)", ctx)).toThrow();
+  });
+
+  let id = 0;
+  it("validates formulas, references and step order", async () => {
+    const base = { name: "Rules", access: { departments: ["MIS"] }, fields: [{ label: "Qty", type: "number" }] };
+    const bad1 = await call("POST", "/api/fms/definitions", { token: admin, body: { ...base, fields: [...base.fields, { label: "X", formula: "{nope} + 1" }], steps: [{ name: "a", assign: { departments: ["MIS"] } }] } });
+    expect(bad1.json.errors.join(" ")).toMatch(/unknown reference \{nope\}/);
+    const bad2 = await call("POST", "/api/fms/definitions", { token: admin, body: { ...base, steps: [{ name: "a", assign: { departments: ["MIS"] }, depends_on: [2] }, { name: "b", assign: { departments: ["MIS"] } }] } });
+    expect(bad2.json.errors.join(" ")).toMatch(/earlier step/);
+    const bad3 = await call("POST", "/api/fms/definitions", { token: admin, body: { ...base, steps: [{ name: "a", assign: { departments: ["MIS"] }, plan: { rules: [{ formula: "ADDDAYS({row.start}, " }] } }] } });
+    expect(bad3.status).toBe(400);
+  });
+
+  it("calculated columns, parallel steps and conditional plan rules", async () => {
+    const d = await call("POST", "/api/fms/definitions", {
+      token: admin,
+      body: {
+        name: "Rules FMS", access: { departments: ["MIS"] }, start_field: "date_time",
+        fields: [
+          { label: "Date & Time", type: "datetime" }, { label: "Qty", type: "number", required: true },
+          { label: "Size Class", type: "text", formula: 'IF({qty} > 100, "BIG", "SMALL")' },
+          { label: "Month", type: "text", formula: 'TEXT({date_time}, "MMM-YY")' },
+        ],
+        steps: [
+          { name: "Check", assign: { employees: ["FEMP2"] }, tat: { type: "hours", value: 2 } },
+          { name: "Parallel", assign: { employees: ["FEMP3"] }, depends_on: [], plan: { rules: [{ formula: 'SETTIME(ADDWORKDAYS({row.start}, 2), "18:00")' }] } },
+          {
+            name: "After both", assign: { employees: ["FEMP2"] }, depends_on: [1, 2],
+            plan: { rules: [
+              { when: [{ field: "qty", op: "gt", value: 100 }], base: "step:1:actual", offset: 3, unit: "days" },
+              { base: "previous", offset: 1, unit: "working_days", at_time: "12:00" },
+            ] },
+          },
+        ],
+      },
+    });
+    expect(d.status, JSON.stringify(d.json)).toBe(201);
+    id = d.json.id;
+    expect(d.json.definition.steps[1].depends_on).toEqual([]);
+    const mk = async (qty: number) => {
+      const r = await call("POST", `/api/fms/definitions/${id}/records`, { token: admin, body: { data: { date_time: "05/01/2026 11:00", qty } } });
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      return (await call("GET", `/api/fms/records/${r.json.id}`, { token: admin })).json.record;
+    };
+    let rec = await mk(150);
+    expect(rec.data).toMatchObject({ size_class: "BIG", month: "Jan-26" });
+    expect(rec.steps.map((s: any) => s.status)).toEqual(["pending", "pending", "waiting"]); // STEP-2 runs in parallel
+    expect(formatIST(rec.steps[1].planned_at)).toBe("07/01/2026 18:00");
+    await call("POST", `/api/fms/steps/${rec.steps[0].id}/complete`, { token: ravi, body: {} });
+    rec = (await call("GET", `/api/fms/records/${rec.id}`, { token: admin })).json.record;
+    expect(rec.steps[2].status).toBe("waiting"); // still waits for STEP-2
+    await call("POST", `/api/fms/steps/${rec.steps[1].id}/complete`, { token: meena, body: {} });
+    rec = (await call("GET", `/api/fms/records/${rec.id}`, { token: admin })).json.record;
+    expect(rec.steps[2].status).toBe("pending");
+    const s1 = new Date(rec.steps[0].actual_at).getTime();
+    expect(new Date(rec.steps[2].planned_at).getTime() - s1).toBe(3 * 86_400_000); // qty > 100 rule: STEP-1 actual + 3 days
+
+    let small = await mk(50);
+    expect(small.data.size_class).toBe("SMALL");
+    await call("POST", `/api/fms/steps/${small.steps[0].id}/complete`, { token: ravi, body: {} });
+    await call("POST", `/api/fms/steps/${small.steps[1].id}/complete`, { token: meena, body: {} });
+    small = (await call("GET", `/api/fms/records/${small.id}`, { token: admin })).json.record;
+    expect(formatIST(small.steps[2].planned_at).slice(11)).toBe("12:00"); // default rule: next working day at 12:00
+
+    // edit recalculates; formula test endpoint
+    const ed = await call("PUT", `/api/fms/records/${small.id}`, { token: admin, body: { data: { qty: 500 } } });
+    expect(ed.json.data.qty).toBe(500);
+    expect((await call("GET", `/api/fms/records/${small.id}`, { token: admin })).json.record.data.size_class).toBe("BIG");
+    const t = await call("POST", "/api/fms/formula/test", { token: admin, body: { fms_id: id, formula: '{size_class} & "-" & {qty}' } });
+    expect(t.json.value).toBe("BIG-500");
+    expect((await call("POST", "/api/fms/formula/test", { token: admin, body: { formula: "SUM(1," } })).status).toBe(400);
+    expect((await call("POST", `/api/fms/definitions/${id}/recalculate`, { token: admin })).json.rows).toBe(2);
   });
 });
 

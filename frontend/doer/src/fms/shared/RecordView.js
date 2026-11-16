@@ -50,8 +50,9 @@ function StepActions({ rs, step, onDone, flash, isAdmin, employees }) {
             <div className="grid gap-3 sm:grid-cols-2">
               {step.fields.map((f) => (
                 <div key={f.key}>
-                  <Label required={f.required}>{f.label}</Label>
-                  <FieldInput field={f} value={values[f.key]} employees={employees} onChange={(v) => setValues({ ...values, [f.key]: v })} />
+                  <Label required={f.required && !f.formula}>{f.label}{f.formula && " (calculated)"}</Label>
+                  {f.formula ? <div className="rounded border bg-gray-50 px-3 py-2 text-sm">{showValue(f, values[f.key]) || "—"}</div>
+                    : <FieldInput field={f} value={values[f.key]} employees={employees} onChange={(v) => setValues({ ...values, [f.key]: v })} />}
                   {f.help && <p className="mt-0.5 text-xs text-gray-500">{f.help}</p>}
                 </div>
               ))}
@@ -209,8 +210,8 @@ export default function RecordView({ recordId, focusStepId, onClose, onChanged, 
             <div className="grid gap-x-6 gap-y-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
               {def.fields.map((f) => (
                 <div key={f.key} className="min-w-0">
-                  <div className="text-xs font-medium text-gray-500">{f.label}{editing && f.required && <span className="text-red-600"> *</span>}</div>
-                  {editing ? <FieldInput field={f} value={editing[f.key]} employees={employees} onChange={(v) => setEditing({ ...editing, [f.key]: v })} />
+                  <div className="text-xs font-medium text-gray-500">{f.label}{f.formula && <span className="ml-1 text-indigo-600" title={f.formula}>ƒ</span>}{editing && f.required && !f.formula && <span className="text-red-600"> *</span>}</div>
+                  {editing && !f.formula ? <FieldInput field={f} value={editing[f.key]} employees={employees} onChange={(v) => setEditing({ ...editing, [f.key]: v })} />
                     : <div className="break-words text-sm text-gray-900">{showValue(f, rec.data[f.key]) || <span className="text-gray-300">—</span>}</div>}
                 </div>
               ))}

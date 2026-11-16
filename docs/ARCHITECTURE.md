@@ -39,7 +39,7 @@
 | `allDashboard` | own scorecard only | any / all employees |
 | `additionalfeature` | own links | own links |
 | `em-sheet`, `whatsapp` | — | yes |
-| `fms` | FMS whose "Visible to" departments/designations (mandatory) or listed employees include them — see it and add rows; a step assigned to them from outside that list still appears in My tasks; act only on steps assigned to them, approve where they are approver, own notifications/filters | everything: definitions, import, seating, holidays, bulk, reports, audit, reassign/reopen/skip/planned |
+| `fms` | FMS whose "Visible to" departments/designations (mandatory) include them, or where they are a step doer/approver — see it; add rows if in Visible to or a STEP-1 doer; act only on their own step; act only on steps assigned to them, approve where they are approver, own notifications/filters | everything: definitions, import, seating, holidays, bulk, reports, audit, reassign/reopen/skip/planned |
 
 ## Data model (D1)
 
@@ -60,8 +60,8 @@
 | `em_sheet_rows` | EM spreadsheet grid | `row_index` | raw grid, parsed exactly like before; admins can replace via `PUT /api/em-sheet/em-sheet` |
 | `counters`, `job_runs`, `audit_log` | new | | atomic IDs, cron idempotency, who-did-what |
 | `fms_definitions` | new (FMS sheets) | `fms_id` (FMS-0001), `code` | access, calendar, recurrence, settings JSON; soft delete / archive / template; `version` |
-| `fms_fields` | FMS columns | (`fms_id`,`key`) | `step_id` NULL = row column, else a step input; 13 field types |
-| `fms_steps` | STEP-1..n + WHAT/WHO/HOW/WHEN rows | id | `seat_id` / `assign` (WHO), `tat` JSON (hours/days/T-n), `condition`, approval, `jumps` (status → later step, migration 0006) |
+| `fms_fields` | FMS columns | (`fms_id`,`key`) | `step_id` NULL = row column, else a step input; 13 field types; `formula` = calculated column (0007) |
+| `fms_steps` | STEP-1..n + WHAT/WHO/HOW/WHEN rows | id | `seat_id` / `assign` (WHO), `tat` JSON (hours/days/T-n), `condition`, approval, `jumps` (status → later step, 0006), `plan` rules + `depends_on` (0007) |
 | `fms_seats`, `fms_seat_members` | WHO codes (CRM, PC-1) | `code` | members = department / designation / employee with optional date range |
 | `fms_records`, `fms_record_steps` | one sheet row; Planned/Actual/Status/Delay per step | (`fms_id`,`uid`), (`record_id`,`step_id`) | row data JSON; step status waiting/pending/in_progress/submitted/rejected/done/skipped |
 | `fms_step_history`, `fms_comments`, `fms_attachments`, `fms_notifications` | new | id | per-row audit, comments (internal notes), files (Cloudinary/R2), in-app notifications |
@@ -138,6 +138,13 @@ Code: `api/src/lib/fms/*` (calendar, engine, definitions, records, importer, act
 `frontend/admin/src/fms`, `frontend/doer/src/fms`.
 - **Planning** reproduces the sheet formulas in IST: working days = `WORKDAY.INTL` (weekly off + `fms_holidays`),
   fractional WHEN (0.25) = working hours inside the work window, `T-n` = n days before a date column.
+- **Formulas** (`lib/fms/formula.ts`): Excel-style expressions (IF/IFS/AND/OR, text, maths, ADDWORKDAYS, WORKDAYS,
+  SETTIME, TEXT(date,"MMM-YY") …) over `{column}`, `{stepN.actual|planned|status|done_by|remarks}`, `{row.start|created|uid}`.
+  Used by calculated columns (recomputed on every change) and plan rules. Parsed, never `eval`-ed.
+- **Plan rules**: per step, ordered; the first whose conditions match plans the step from a base (previous actual,
+  row start, any step's actual/planned, a date column, when the step starts) ± an offset in working days/hours or
+  calendar units, optionally at a fixed time — or from a formula. No match → the step's TAT.
+- **Step order**: `depends_on` — after the previous step (default), after chosen steps, or in parallel with the row.
 - **Flow**: creating a row activates STEP-1; completing a step (or approving it) plans and activates the next one,
   skipping steps whose condition is false or that a status jump passes over; the row completes after the last step.
 - **Import**: `POST /api/fms/import/analyze` reads EPIL's FMS layout (STEP labels, WHAT/WHO/HOW/WHEN rows,

@@ -5,10 +5,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "./shared/api";
 import { Btn, Spinner, Tabs, ErrorBox, Label, inputCls, MultiPick, useFlash, cx } from "./shared/ui";
 import { FmsNav } from "./FmsAdmin";
+import { OPS, refOptions, PlanRules, StartsAfter, FormulaToggle } from "./FmsRules";
 
 const TYPES = [["text", "Text"], ["textarea", "Long text"], ["number", "Number"], ["date", "Date"], ["datetime", "Date & time"], ["select", "Dropdown"], ["multiselect", "Multi-select"],
   ["checkbox", "Yes / No"], ["email", "Email"], ["phone", "Phone"], ["url", "Link"], ["employee", "Employee"], ["file", "File note"]];
-const OPS = [["eq", "is"], ["neq", "is not"], ["in", "is one of"], ["not_in", "is not one of"], ["empty", "is empty"], ["not_empty", "is filled"], ["contains", "contains"]];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "field";
 const blankDef = () => ({
@@ -17,10 +17,10 @@ const blankDef = () => ({
   frequency: "on_demand", schedule: { time: "10:00", days: [], dates: [1], months: [1] }, start_date: "", due_date: "", start_field: "", uid_prefix: "UID-",
   settings: { reminderHours: 2, escalationHours: 0 }, fields: [], steps: [],
 });
-const newStep = (i) => ({ name: "", code: `STEP-${i + 1}`, seat_id: null, assign: { departments: [], designations: [], employees: [] }, how: "", tat: { type: "days", value: 1, from: "previous" }, condition: null, requires_approval: false, approver: { seat_id: null, departments: [], designations: [], employees: [] }, status_options: ["Done"], jumps: {}, reminder: {}, escalation: {}, fields: [] });
+const newStep = (i) => ({ name: "", code: `STEP-${i + 1}`, seat_id: null, assign: { departments: [], designations: [], employees: [] }, how: "", tat: { type: "days", value: 1, from: "previous" }, condition: null, requires_approval: false, approver: { seat_id: null, departments: [], designations: [], employees: [] }, status_options: ["Done"], jumps: {}, plan: { rules: [] }, depends_on: null, reminder: {}, escalation: {}, fields: [] });
 const move = (arr, i, d) => { const a = [...arr]; const j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; };
 
-function FieldsEditor({ fields, onChange, allKeys, title }) {
+function FieldsEditor({ fields, onChange, allKeys, title, refs = [], fmsId }) {
   const set = (i, patch) => {
     const next = fields.map((f, k) => (k === i ? { ...f, ...patch } : f));
     if (patch.label !== undefined && !fields[i].id) {
@@ -52,12 +52,14 @@ function FieldsEditor({ fields, onChange, allKeys, title }) {
           <div className="flex flex-wrap items-center gap-3 text-sm md:col-span-2">
             <label className="flex items-center gap-1"><input type="checkbox" checked={!!f.required} onChange={(e) => set(i, { required: e.target.checked })} /> Required</label>
             {title === "Column" && <label className="flex items-center gap-1"><input type="checkbox" checked={f.in_list !== false} onChange={(e) => set(i, { in_list: e.target.checked })} /> In grid</label>}
+            {(f.formula || f._calc) && <span className="rounded bg-indigo-100 px-1.5 text-xs text-indigo-800">ƒ calculated</span>}
           </div>
           <div className="flex gap-1 md:col-span-1">
             <Btn size="sm" kind="ghost" onClick={() => onChange(move(fields, i, -1))} title="Up">↑</Btn>
             <Btn size="sm" kind="ghost" onClick={() => onChange(move(fields, i, 1))} title="Down">↓</Btn>
             <Btn size="sm" kind="ghost" className="text-red-600" onClick={() => onChange(fields.filter((_, k) => k !== i))} title="Remove">✕</Btn>
           </div>
+          <FormulaToggle field={f} refs={refs} fmsId={fmsId} onChange={(patch) => set(i, patch)} />
         </div>
       ))}
       <Btn kind="secondary" size="sm" onClick={() => onChange([...fields, { label: "", key: "", type: "text", options: [], required: false, in_list: true }])}>+ Add {title.toLowerCase()}</Btn>
@@ -78,9 +80,9 @@ function WhoPicker({ value, onChange, lk, withSeat = true }) {
           </select>
         </div>
       )}
-      <div><Label>Departments</Label><MultiPick options={lk.departments} value={v.departments || []} onChange={(x) => onChange({ ...v, departments: x })} allowCustom /></div>
-      <div><Label>Designations</Label><MultiPick options={lk.designations} value={v.designations || []} onChange={(x) => onChange({ ...v, designations: x })} allowCustom /></div>
-      <div><Label>Employees</Label><MultiPick options={lk.employees.map((e) => ({ value: e.employee_id, label: `${e.name} (${e.department || "—"})` }))} value={v.employees || []} onChange={(x) => onChange({ ...v, employees: x })} /></div>
+      <div className={withSeat ? "rounded-md bg-green-50 p-1.5 md:col-span-2" : ""}><Label>{withSeat ? "Doer — employee name(s)" : "Employees"}</Label><MultiPick options={lk.employees.map((e) => ({ value: e.employee_id, label: `${e.name} (${e.department || "—"}${e.designation ? `, ${e.designation}` : ""})` }))} value={v.employees || []} onChange={(x) => onChange({ ...v, employees: x })} placeholder="Type a name…" /></div>
+      <div><Label>{withSeat ? "or Departments" : "Departments"}</Label><MultiPick options={lk.departments} value={v.departments || []} onChange={(x) => onChange({ ...v, departments: x })} allowCustom /></div>
+      <div><Label>{withSeat ? "or Designations" : "Designations"}</Label><MultiPick options={lk.designations} value={v.designations || []} onChange={(x) => onChange({ ...v, designations: x })} allowCustom /></div>
     </div>
   );
 }
@@ -110,7 +112,6 @@ export default function FmsBuilder() {
   const set = (patch) => setDef({ ...def, ...patch });
   const noAccess = !def.access?.departments?.length && !def.access?.designations?.length;
   const setStep = (i, patch) => set({ steps: def.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
-  const fieldsBefore = (i) => [...def.fields, ...def.steps.slice(0, i + 1).flatMap((s) => s.fields)].filter((f) => f.key);
 
   const save = async () => {
     if (noAccess) { setTab("basic"); setErrors(["Select at least one department or designation in “Visible to”"]); window.scrollTo(0, 0); return; }
@@ -218,7 +219,7 @@ export default function FmsBuilder() {
         {tab === "columns" && (
           <div className="rounded-lg border bg-gray-50 p-4">
             <p className="mb-3 text-sm text-gray-600">The FMS's own data columns (filled when a row is created). Step inputs are added on each step.</p>
-            <FieldsEditor title="Column" fields={def.fields} allKeys={allKeys} onChange={(fields) => set({ fields })} />
+            <FieldsEditor title="Column" fields={def.fields} allKeys={allKeys} refs={refOptions(def, def.steps.length)} fmsId={id} onChange={(fields) => set({ fields })} />
           </div>
         )}
 
@@ -242,7 +243,8 @@ export default function FmsBuilder() {
                   <div><Label required>WHAT — step name</Label><input className={inputCls} value={s.name} onChange={(e) => setStep(i, { name: e.target.value })} placeholder="e.g. Confirm status from dispatch" /></div>
                   <div><Label>HOW — method / instruction</Label><input className={inputCls} value={s.how} onChange={(e) => setStep(i, { how: e.target.value })} placeholder="e.g. Phone call, WhatsApp" /></div>
                 </div>
-                <div className="mt-3"><Label required>WHO — doer (seat and/or department / designation / employees)</Label>
+                <div className="mt-3"><Label required>WHO — who does this step (employee name, or seat / department / designation)</Label>
+                  <p className="mb-1 text-xs text-gray-500">Only these people can do this step. They will also see this FMS, but cannot act on other steps.</p>
                   <WhoPicker value={{ seat_id: s.seat_id, ...s.assign }} lk={lk} onChange={(v) => setStep(i, { seat_id: v.seat_id, assign: { departments: v.departments || [], designations: v.designations || [], employees: v.employees || [] } })} />
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -268,12 +270,18 @@ export default function FmsBuilder() {
                     </div>
                   )}
                 </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div><Label>Starts</Label><StartsAfter step={s} index={i} steps={def.steps} onChange={(d) => setStep(i, { depends_on: d })} /></div>
+                </div>
+                <div className="mt-3"><Label>Plan rules (advanced WHEN)</Label>
+                  <PlanRules step={s} index={i} def={def} fmsId={id} onChange={(plan) => setStep(i, { plan })} />
+                </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
                   <div className="md:col-span-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!s.condition} onChange={(e) => setStep(i, { condition: e.target.checked ? { field: "", op: "eq", value: "" } : null })} /> Run this step only if… (otherwise it is skipped)</label></div>
                   {s.condition && (
                     <>
                       <select className={inputCls} value={s.condition.field} onChange={(e) => setStep(i, { condition: { ...s.condition, field: e.target.value } })}>
-                        <option value="">— column —</option>{fieldsBefore(i - 1).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                        <option value="">— column —</option>{refOptions(def, i).filter((r) => !(s.fields || []).some((f) => f.key === r.value)).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                       </select>
                       <select className={inputCls} value={s.condition.op} onChange={(e) => setStep(i, { condition: { ...s.condition, op: e.target.value } })}>{OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
                       {!["empty", "not_empty"].includes(s.condition.op) && <input className={`${inputCls} md:col-span-2`} value={Array.isArray(s.condition.value) ? s.condition.value.join(", ") : s.condition.value ?? ""} placeholder={["in", "not_in"].includes(s.condition.op) ? "values, comma separated" : "value"}
@@ -311,7 +319,7 @@ export default function FmsBuilder() {
                 </div>
                 <div className="mt-3">
                   <Label>Step inputs (columns the doer fills in this step)</Label>
-                  <FieldsEditor title="Input" fields={s.fields} allKeys={allKeys} onChange={(fields) => setStep(i, { fields })} />
+                  <FieldsEditor title="Input" fields={s.fields} allKeys={allKeys} refs={refOptions(def, i)} fmsId={id} onChange={(fields) => setStep(i, { fields })} />
                 </div>
               </div>
             ))}

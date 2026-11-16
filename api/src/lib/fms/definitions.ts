@@ -3,15 +3,17 @@
 import type { Env } from "../../types";
 import { fail, str } from "../util";
 import { parseInstant } from "./calendar";
+import { formulaRefs, FormulaError } from "./formula";
 import { j, type DefRow, type FieldRow, type StepRow } from "./engine";
 
 export const FIELD_TYPES = ["text", "textarea", "number", "date", "datetime", "select", "multiselect", "email", "phone", "url", "checkbox", "file", "employee"] as const;
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
 const FREQUENCIES = ["on_demand", "one_time", "daily", "weekly", "monthly", "quarterly", "yearly"];
 const TAT_TYPES = ["none", "hours", "days", "before_field", "after_field"];
-const OPS = ["eq", "neq", "in", "not_in", "empty", "not_empty", "contains"];
+const OPS = ["eq", "neq", "in", "not_in", "empty", "not_empty", "contains", "gt", "gte", "lt", "lte"];
+const UNITS = ["working_days", "working_hours", "days", "hours", "minutes"];
 
-export interface FieldInput { id?: number; key?: string; label: string; type?: string; options?: string[]; required?: boolean; default_value?: string; help?: string; in_list?: boolean }
+export interface FieldInput { id?: number; key?: string; label: string; type?: string; options?: string[]; required?: boolean; default_value?: string; help?: string; in_list?: boolean; formula?: string }
 export interface StepInput {
   id?: number; name: string; code?: string; seat_id?: number | null; assign?: Record<string, string[]>; how?: string;
   tat?: { type?: string; value?: number; field?: string; from?: string }; condition?: { field: string; op: string; value?: unknown } | null;
@@ -19,6 +21,10 @@ export interface StepInput {
   escalation?: Record<string, unknown>; fields?: FieldInput[];
   /** status option → step position to continue at (steps in between are skipped), e.g. {"Close": 5} */
   jumps?: Record<string, number>;
+  /** plan rules (first matching wins, else TAT) */
+  plan?: { rules?: { when?: { field: string; op: string; value?: unknown }[]; base?: string; offset?: number; unit?: string; at_time?: string; formula?: string }[] };
+  /** positions of steps that must finish before this one starts; undefined/null = previous step, [] = with the row */
+  depends_on?: number[] | null;
 }
 export interface DefinitionInput {
   name: string; code?: string; category?: string; description?: string; instructions?: string; priority?: string; status?: string;
@@ -52,7 +58,7 @@ export function normaliseDefinition(input: DefinitionInput) {
     const type = (FIELD_TYPES as readonly string[]).includes(str(f.type)) ? str(f.type) : "text";
     const options = strList(f.options);
     if ((type === "select" || type === "multiselect") && !options.length) errors.push(`${where}: "${label}" needs at least one option`);
-    return { id: f.id, key, label, type, options, required: !!f.required, default_value: str(f.default_value), help: str(f.help), in_list: f.in_list !== false };
+    return { id: f.id, key, label, type, options, required: !!f.required, default_value: str(f.default_value), help: str(f.help), in_list: f.in_list !== false, formula: str(f.formula).trim() };
   };
   const fields = (input.fields || []).map((f, i) => normField(f, `Column ${i + 1}`));
   const steps = (input.steps || []).map((s, i) => {
@@ -83,14 +89,50 @@ export function normaliseDefinition(input: DefinitionInput) {
     return {
       id: s.id, name: str(s.name).trim(), code: str(s.code).trim() || `STEP-${i + 1}`, seat_id: seatId, assign, how: str(s.how), tat, condition,
       requires_approval: !!s.requires_approval, approver, status_options: statusOptions.length ? statusOptions : ["Done"],
-      reminder: s.reminder || {}, escalation: s.escalation || {}, jumps, fields: (s.fields || []).map((f, k) => normField(f, `${where} input ${k + 1}`)),
+      reminder: s.reminder || {}, escalation: s.escalation || {}, jumps,
+      plan: { rules: (s.plan?.rules || []).map((r) => ({
+        when: (r.when || []).filter((c) => str(c?.field)).map((c) => ({ field: str(c.field), op: str(c.op) || "eq", value: c.value ?? "" })),
+        base: str(r.base) || "previous", offset: Number(r.offset || 0), unit: UNITS.includes(str(r.unit)) ? str(r.unit) : "working_days",
+        at_time: /^\d{1,2}:\d{2}$/.test(str(r.at_time)) ? str(r.at_time) : "", formula: str(r.formula).trim(),
+      })) },
+      depends_on: Array.isArray(s.depends_on) ? [...new Set(s.depends_on.map(Number).filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => a - b) : null,
+      fields: (s.fields || []).map((f, k) => normField(f, `${where} input ${k + 1}`)),
     };
   });
   const allKeys = new Set([...fields.map((f) => f.key), ...steps.flatMap((s) => s.fields.map((f) => f.key))]);
+  // what conditions / formulas may reference: column keys, stepN.actual|planned|status|outcome|done_by|remarks, row.start|created|uid
+  const refOk = (r: string) => {
+    const k = r.trim();
+    if (allKeys.has(k) || allKeys.has(k.toLowerCase())) return true;
+    if (/^row\.(start|created|uid)$/i.test(k)) return true;
+    const m = /^step(\d+)\.(actual|planned|status|outcome|done_by|remarks)$/i.exec(k);
+    return !!m && Number(m[1]) >= 1 && Number(m[1]) <= steps.length;
+  };
+  const checkFormula = (src: string, where: string, self?: string) => {
+    try {
+      for (const r of formulaRefs(src)) {
+        if (self && r === self) errors.push(`${where}: a formula cannot use its own column`);
+        else if (!refOk(r)) errors.push(`${where}: unknown reference {${r}}`);
+      }
+    } catch (e) { errors.push(`${where}: ${e instanceof FormulaError ? e.message : "invalid formula"}`); }
+  };
   for (const s of steps) {
     if ((s.tat.type === "before_field" || s.tat.type === "after_field") && s.tat.field && !allKeys.has(s.tat.field)) errors.push(`${s.code}: TAT column "${s.tat.field}" does not exist`);
-    if (s.condition && !allKeys.has(s.condition.field)) errors.push(`${s.code}: condition column "${s.condition.field}" does not exist`);
+    if (s.condition && !refOk(s.condition.field)) errors.push(`${s.code}: condition column "${s.condition.field}" does not exist`);
+    for (const d of s.depends_on || []) if (d >= steps.indexOf(s) + 1) errors.push(`${s.code}: can only start after an earlier step (STEP-${d} is not before it)`);
+    (s.plan.rules || []).forEach((r, k) => {
+      const where = `${s.code} plan rule ${k + 1}`;
+      for (const c of r.when || []) {
+        if (!OPS.includes(c.op)) errors.push(`${where}: unknown condition operator`);
+        if (!refOk(c.field)) errors.push(`${where}: "${c.field}" does not exist`);
+      }
+      if (r.formula) checkFormula(r.formula, where);
+      else if (r.base.startsWith("field:") && !allKeys.has(r.base.slice(6))) errors.push(`${where}: date column "${r.base.slice(6)}" does not exist`);
+      else if (r.base.startsWith("step:") && !(Number(r.base.split(":")[1]) >= 1 && Number(r.base.split(":")[1]) <= steps.length)) errors.push(`${where}: unknown step`);
+      else if (!["previous", "start", "created", "activated"].includes(r.base) && !/^(field|step):/.test(r.base)) errors.push(`${where}: unknown base "${r.base}"`);
+    });
   }
+  for (const f of [...fields, ...steps.flatMap((s) => s.fields)]) if (f.formula) checkFormula(f.formula, `Column "${f.label}"`, f.key);
   // who sees the FMS: at least one department or designation is mandatory
   const access = spec(input.access);
   if (!access.departments.length && !access.designations.length) errors.push("Select at least one department or designation that will see this FMS");
@@ -121,7 +163,7 @@ export async function getDefinition(env: Env, id: number) {
   const def = (d.results as DefRow[])[0];
   if (!def) return null;
   const fields = fl.results as FieldRow[];
-  const outField = (f: FieldRow) => ({ id: f.id, key: f.key, label: f.label, type: f.type, options: j(f.options, []), required: !!f.required, default_value: f.default_value, help: f.help, in_list: !!f.in_list });
+  const outField = (f: FieldRow) => ({ id: f.id, key: f.key, label: f.label, type: f.type, options: j(f.options, []), required: !!f.required, default_value: f.default_value, help: f.help, in_list: !!f.in_list, formula: f.formula || "" });
   return {
     ...def, archived: !!def.archived, deleted: !!def.deleted, is_template: !!def.is_template,
     access: j(def.access, {}), calendar: j(def.calendar, {}), schedule: j(def.schedule, {}), settings: j(def.settings, {}),
@@ -129,7 +171,8 @@ export async function getDefinition(env: Env, id: number) {
     steps: (st.results as StepRow[]).map((s) => ({
       id: s.id, position: s.position, code: s.code, name: s.name, seat_id: s.seat_id, assign: j(s.assign, {}), how: s.how, tat: j(s.tat, {}),
       condition: j(s.condition, null), requires_approval: !!s.requires_approval, approver: j(s.approver, {}), status_options: j(s.status_options, ["Done"]),
-      reminder: j(s.reminder, {}), escalation: j(s.escalation, {}), jumps: j<Record<string, number>>(s.jumps, {}), fields: fields.filter((f) => f.step_id === s.id).map(outField),
+      reminder: j(s.reminder, {}), escalation: j(s.escalation, {}), jumps: j<Record<string, number>>(s.jumps, {}),
+      plan: j(s.plan, { rules: [] }), depends_on: s.depends_on ? j<number[] | null>(s.depends_on, null) : null, fields: fields.filter((f) => f.step_id === s.id).map(outField),
     })),
   };
 }
@@ -179,14 +222,14 @@ export async function saveDefinition(env: Env, n: Normalised, by: string, existi
   for (let i = 0; i < n.steps.length; i++) {
     const s = n.steps[i];
     const vals = [i + 1, s.code, s.name, s.seat_id, JSON.stringify(s.assign), s.how, JSON.stringify(s.tat), s.condition ? JSON.stringify(s.condition) : "",
-      s.requires_approval ? 1 : 0, JSON.stringify(s.approver), JSON.stringify(s.status_options), JSON.stringify(s.reminder), JSON.stringify(s.escalation), JSON.stringify(s.jumps)];
+      s.requires_approval ? 1 : 0, JSON.stringify(s.approver), JSON.stringify(s.status_options), JSON.stringify(s.reminder), JSON.stringify(s.escalation), JSON.stringify(s.jumps), JSON.stringify(s.plan), s.depends_on ? JSON.stringify(s.depends_on) : ""];
     if (s.id && keep.has(s.id)) {
       await db.prepare(`UPDATE fms_steps SET position = ?, code = ?, name = ?, seat_id = ?, assign = ?, how = ?, tat = ?, condition = ?, requires_approval = ?, approver = ?,
-        status_options = ?, reminder = ?, escalation = ?, jumps = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).bind(...vals, s.id).run();
+        status_options = ?, reminder = ?, escalation = ?, jumps = ?, plan = ?, depends_on = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).bind(...vals, s.id).run();
       stepIds.push(s.id);
     } else {
-      const r = await db.prepare(`INSERT INTO fms_steps (fms_id, position, code, name, seat_id, assign, how, tat, condition, requires_approval, approver, status_options, reminder, escalation, jumps)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(id, ...vals).first<{ id: number }>();
+      const r = await db.prepare(`INSERT INTO fms_steps (fms_id, position, code, name, seat_id, assign, how, tat, condition, requires_approval, approver, status_options, reminder, escalation, jumps, plan, depends_on)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(id, ...vals).first<{ id: number }>();
       stepIds.push(r!.id);
       // existing rows: new step is skipped where the row already passed that point, waiting otherwise
       await db.prepare(`INSERT OR IGNORE INTO fms_record_steps (record_id, step_id, position, status)
@@ -202,10 +245,10 @@ export async function saveDefinition(env: Env, n: Normalised, by: string, existi
   const wantKeys = new Set(all.map((x) => x.f.key));
   const stmts: D1PreparedStatement[] = curFields.filter((f) => !wantKeys.has(f.key)).map((f) => db.prepare("DELETE FROM fms_fields WHERE id = ?").bind(f.id));
   all.forEach(({ f, step }, pos) => {
-    stmts.push(db.prepare(`INSERT INTO fms_fields (fms_id, step_id, key, label, type, options, required, default_value, help, position, in_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    stmts.push(db.prepare(`INSERT INTO fms_fields (fms_id, step_id, key, label, type, options, required, default_value, help, position, in_list, formula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(fms_id, key) DO UPDATE SET step_id = excluded.step_id, label = excluded.label, type = excluded.type, options = excluded.options, required = excluded.required,
-        default_value = excluded.default_value, help = excluded.help, position = excluded.position, in_list = excluded.in_list`)
-      .bind(id, step, f.key, f.label, f.type, JSON.stringify(f.options || []), f.required ? 1 : 0, f.default_value || "", f.help || "", pos + 1, f.in_list === false ? 0 : 1));
+        default_value = excluded.default_value, help = excluded.help, position = excluded.position, in_list = excluded.in_list, formula = excluded.formula`)
+      .bind(id, step, f.key, f.label, f.type, JSON.stringify(f.options || []), f.required ? 1 : 0, f.default_value || "", f.help || "", pos + 1, f.in_list === false ? 0 : 1, f.formula || ""));
   });
   for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
   return id!;
@@ -228,10 +271,11 @@ export function toInput(def: NonNullable<Awaited<ReturnType<typeof getDefinition
  * Validate values for a set of fields. strict: types + required enforced (forms);
  * lenient: keep whatever came in as text (imports from sheets).
  */
-export function coerceValues(fields: Pick<FieldRow, "key" | "label" | "type" | "options" | "required">[], input: Record<string, unknown>, mode: "strict" | "lenient" | "partial") {
+export function coerceValues(fields: (Pick<FieldRow, "key" | "label" | "type" | "options" | "required"> & { formula?: string })[], input: Record<string, unknown>, mode: "strict" | "lenient" | "partial") {
   const values: Record<string, unknown> = {};
   const errors: string[] = [];
   for (const f of fields) {
+    if (f.formula && mode !== "lenient") continue; // calculated: never typed in, recomputed by the engine
     const has = Object.prototype.hasOwnProperty.call(input, f.key);
     if (!has && mode === "partial") continue;
     const raw = input[f.key];
